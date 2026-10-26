@@ -1449,9 +1449,10 @@ async fn pump_events(app: AppHandle, mut events: tokio::sync::mpsc::Receiver<Eve
                 cycle,
                 store_count,
                 target_count,
+                start_interval_ms,
             } => checkout_audit(
                 "cycleStarted",
-                serde_json::json!({"cycle": cycle, "storeCount": store_count, "targetCount": target_count}),
+                serde_json::json!({"cycle": cycle, "storeCount": store_count, "targetCount": target_count, "startIntervalMs": start_interval_ms}),
             ),
             Event::CycleComplete {
                 cycle,
