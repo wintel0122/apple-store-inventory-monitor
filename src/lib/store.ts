@@ -220,15 +220,6 @@ function applyEvent(event: WatcherEvent): void {
       if (event.cycle === 1) {
         recentCycleDurations = [];
       }
-      if (event.startIntervalMs !== null) {
-        recentCycleDurations.push(event.startIntervalMs / 1_000);
-        if (recentCycleDurations.length > RECENT_CYCLE_LIMIT) {
-          recentCycleDurations.shift();
-        }
-      }
-      const averageCycleSeconds = recentCycleDurations.length > 0
-        ? recentCycleDurations.reduce((sum, durationSeconds) => sum + durationSeconds, 0) / recentCycleDurations.length
-        : null;
       update({
         cycle: event.cycle,
         averageCycleSeconds,
@@ -241,11 +232,21 @@ function applyEvent(event: WatcherEvent): void {
       break;
 
     case "cycleComplete": {
+      if (event.startIntervalMs !== null) {
+        recentCycleDurations.push(event.startIntervalMs / 1_000);
+        if (recentCycleDurations.length > RECENT_CYCLE_LIMIT) {
+          recentCycleDurations.shift();
+        }
+      }
+      const averageCycleSeconds = recentCycleDurations.length > 0
+        ? recentCycleDurations.reduce((sum, durationSeconds) => sum + durationSeconds, 0) / recentCycleDurations.length
+        : null;
       const recovered = event.healthy && state.trouble !== null;
       const previousBrowserFailure = describeBrowserFailure(state.rows);
       update({
         rows: event.snapshot,
         cycle: event.cycle,
+        averageCycleSeconds,
         nextCheckAtMs: Date.now() + event.nextCheckInSecs * 1_000,
         cooling: event.cooling,
         route: event.route ?? null,
