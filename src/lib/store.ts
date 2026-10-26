@@ -134,9 +134,9 @@ const DEFAULT_SETTINGS: Settings = {
   },
 };
 
-const RECENT_CYCLE_WINDOW_MS = 15 * 60 * 1_000;
+const RECENT_CYCLE_LIMIT = 1_000;
 let activeCycleStartedAtMs: number | null = null;
-let recentCycleDurations: Array<{ completedAtMs: number; durationSeconds: number }> = [];
+let recentCycleDurations: number[] = [];
 
 let state: UiState = {
   rows: [],
@@ -242,17 +242,14 @@ function applyEvent(event: WatcherEvent): void {
       const previousBrowserFailure = describeBrowserFailure(state.rows);
       const completedAtMs = Date.now();
       if (activeCycleStartedAtMs !== null) {
-        recentCycleDurations.push({
-          completedAtMs,
-          durationSeconds: Math.max(0, completedAtMs - activeCycleStartedAtMs) / 1_000,
-        });
+        recentCycleDurations.push(Math.max(0, completedAtMs - activeCycleStartedAtMs) / 1_000);
+        if (recentCycleDurations.length > RECENT_CYCLE_LIMIT) {
+          recentCycleDurations.shift();
+        }
       }
-      recentCycleDurations = recentCycleDurations.filter(
-        (cycle) => completedAtMs - cycle.completedAtMs <= RECENT_CYCLE_WINDOW_MS,
-      );
       activeCycleStartedAtMs = null;
       const averageCycleSeconds = recentCycleDurations.length > 0
-        ? recentCycleDurations.reduce((sum, cycle) => sum + cycle.durationSeconds, 0) / recentCycleDurations.length
+        ? recentCycleDurations.reduce((sum, durationSeconds) => sum + durationSeconds, 0) / recentCycleDurations.length
         : null;
       update({
         rows: event.snapshot,
