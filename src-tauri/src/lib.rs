@@ -1093,14 +1093,14 @@ async fn notify_all_routes_resting(app: &AppHandle) {
         .unwrap_or((None, None));
     let mut body = format!("{}已全部冷却中", if keyword.is_empty() { "节点" } else { keyword });
     if let Some(seconds) = average_seconds {
-        body.push_str(&format!("\\n平均耗时：{seconds:.2} 秒"));
+        body.push_str(&format!("\n平均耗时：{seconds:.2} 秒"));
     } else {
-        body.push_str("\\n平均耗时：暂无数据");
+        body.push_str("\n平均耗时：暂无数据");
     }
     if let Some(seconds) = fastest_one_percent_seconds {
-        body.push_str(&format!("\\n最快 1%：{seconds:.2} 秒"));
+        body.push_str(&format!("\n最快 1%：{seconds:.2} 秒"));
     } else {
-        body.push_str("\\n最快 1%：暂无数据");
+        body.push_str("\n最快 1%：暂无数据");
     }
     let push = BarkPush {
         level: settings.bark_options.level,
