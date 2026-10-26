@@ -96,9 +96,6 @@ pub enum Event {
         /// 本轮覆盖的监控项数量。
         #[serde(rename = "targetCount")]
         target_count: usize,
-        /// 距离上一轮实际开始的单调时钟间隔；本会话首轮为空。
-        #[serde(rename = "startIntervalMs")]
-        start_interval_ms: Option<u64>,
     },
     /// 一轮查询结束，带上完整快照。
     ///
@@ -109,6 +106,9 @@ pub enum Event {
         /// 从开始调度到所有门店查询结束的耗时，包含限速与会话暖场。
         #[serde(rename = "elapsedMs")]
         elapsed_ms: u64,
+        /// 距离上一轮实际开始的单调时钟间隔；本会话首轮为空。
+        #[serde(rename = "startIntervalMs")]
+        start_interval_ms: Option<u64>,
         /// 本轮真正发往 Apple 的请求数；响应缓存命中不计入。
         #[serde(rename = "requestCount")]
         request_count: u32,
@@ -647,7 +647,6 @@ impl<F: Fetcher> Engine<F> {
                 cycle,
                 store_count,
                 target_count: expected.len(),
-                start_interval_ms,
             });
             let queried_delivery_region = self.config.delivery_region.clone();
             let queries = run_queries(
@@ -718,6 +717,7 @@ impl<F: Fetcher> Engine<F> {
                 .apply(
                     cycle,
                     started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                    start_interval_ms,
                     expected,
                     outcomes,
                     stats,
@@ -888,6 +888,7 @@ impl<F: Fetcher> Engine<F> {
         &mut self,
         cycle: u64,
         elapsed_ms: u64,
+        start_interval_ms: Option<u64>,
         mut missing: BTreeSet<TargetKey>,
         outcomes: Vec<StoreOutcome>,
         stats: CycleStats,
@@ -999,6 +1000,7 @@ impl<F: Fetcher> Engine<F> {
         self.emit_critical(Event::CycleComplete {
             cycle,
             elapsed_ms,
+            start_interval_ms,
             request_count: stats.request_count,
             reused_response_count: stats.reused_response_count,
             next_check_in_secs,
