@@ -1518,7 +1518,7 @@ async fn pump_events(app: AppHandle, mut events: tokio::sync::mpsc::Receiver<Eve
                         if let Ok(mut metrics) = state.cycle_metrics.lock() {
                             metrics.reset();
                         }
-                        let _ = app.emit("cycleMetrics", serde_json::json!({
+                        let _ = app.emit(EVENT_CHANNEL, serde_json::json!({"type": "cycleMetrics",
                             "averageCycleSeconds": null,
                             "onePercentLowSeconds": null
                         }));
@@ -1536,7 +1536,7 @@ async fn pump_events(app: AppHandle, mut events: tokio::sync::mpsc::Receiver<Eve
             if let Some(state) = app.try_state::<AppState>() {
                 if let Ok(mut metrics) = state.cycle_metrics.lock() {
                     metrics.record(*interval_ms);
-                    let _ = app.emit("cycleMetrics", serde_json::json!({
+                    let _ = app.emit(EVENT_CHANNEL, serde_json::json!({"type": "cycleMetrics",
                         "averageCycleSeconds": metrics.average_seconds,
                         "onePercentLowSeconds": metrics.fastest_one_percent_seconds
                     }));
