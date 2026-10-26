@@ -304,14 +304,46 @@ struct CategoryDto {
     title: &'static str,
 }
 
+struct CycleMetrics {
+    samples_ms: Vec<u64>,
+    average_seconds: Option<f64>,
+    fastest_one_percent_seconds: Option<f64>,
+}
+
+impl CycleMetrics {
+    fn reset(&mut self) {
+        self.samples_ms.clear();
+        self.average_seconds = None;
+        self.fastest_one_percent_seconds = None;
+    }
+
+    fn record(&mut self, interval_ms: u64) {
+        self.samples_ms.push(interval_ms);
+        if self.samples_ms.len() > 1_000 {
+            self.samples_ms.remove(0);
+        }
+        let count = self.samples_ms.len();
+        self.average_seconds = Some(
+            self.samples_ms.iter().map(|&ms| ms as f64).sum::<f64>() / count as f64 / 1_000.0,
+        );
+        let fastest_count = ((count as f64 * 0.01).ceil() as usize).max(1);
+        let mut sorted = self.samples_ms.clone();
+        sorted.sort_unstable();
+        self.fastest_one_percent_seconds = Some(
+            sorted.iter().take(fastest_count).map(|&ms| ms as f64).sum::<f64>()
+                / fastest_count as f64 / 1_000.0,
+        );
+    }
+}
+
 struct AppState {
     watcher: Watcher,
     fetcher: AppleChromiumFetcher,
     checkout: CheckoutRunner,
     catalog: Catalog,
     http: reqwest::Client,
-    /// 最近 1000 个实际轮次开始间隔（毫秒），供全节点冷却 Bark 提醒使用。
-    cycle_intervals_ms: StdMutex<Vec<u64>>,
+    /// 唯一的轮次统计数据源，供前端和 Bark 共用。
+    cycle_metrics: StdMutex<CycleMetrics>,
     /// 设置的内存副本。有可用的持久化存储时，只在新设置成功落盘后更新。
     settings: RwLock<Settings>,
     /// 为 `None` 表示配置不可持久化（目录不可写，或上次读取失败已放弃写盘）。
@@ -1077,19 +1109,9 @@ async fn notify_all_routes_resting(app: &AppHandle) {
     }
 
     let keyword = settings.network.clash.node_filter.trim();
-    let (average_seconds, fastest_one_percent_seconds) = state.cycle_intervals_ms
+    let (average_seconds, fastest_one_percent_seconds) = state.cycle_metrics
         .lock()
-        .map(|samples| {
-            if samples.is_empty() {
-                return (None, None);
-            }
-            let average = samples.iter().map(|&ms| ms as f64).sum::<f64>() / samples.len() as f64 / 1_000.0;
-            let fastest_count = ((samples.len() as f64 * 0.01).ceil() as usize).max(1);
-            let mut sorted = samples.clone();
-            sorted.sort_unstable();
-            let fastest = sorted.iter().take(fastest_count).map(|&ms| ms as f64).sum::<f64>() / fastest_count as f64 / 1_000.0;
-            (Some(average), Some(fastest))
-        })
+        .map(|metrics| (metrics.average_seconds, metrics.fastest_one_percent_seconds))
         .unwrap_or((None, None));
     let mut body = format!("{}已全部冷却中", if keyword.is_empty() { "节点" } else { keyword });
     if let Some(seconds) = average_seconds {
@@ -1799,7 +1821,11 @@ pub fn run() {
                 checkout: CheckoutRunner::new(),
                 catalog,
                 http: reqwest::Client::new(),
-                cycle_intervals_ms: StdMutex::new(Vec::new()),
+                cycle_metrics: StdMutex::new(CycleMetrics {
+                    samples_ms: Vec::new(),
+                    average_seconds: None,
+                    fastest_one_percent_seconds: None,
+                }),
                 settings: RwLock::new(settings),
                 store,
             });
