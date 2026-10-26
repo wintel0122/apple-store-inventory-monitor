@@ -593,7 +593,7 @@ export default function App() {
     ? `平均 ${ui.averageCycleSeconds.toFixed(2)} 秒 · `
     : "";
   const onePercentLowPrefix = ui.onePercentLowSeconds !== null
-    ? `1% Low ${ui.onePercentLowSeconds.toFixed(2)} 秒 · `
+    ? `最快 1% ${ui.onePercentLowSeconds.toFixed(2)} 秒 · `
     : "";
 
   const storeOptions = useMemo(
