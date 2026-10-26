@@ -134,9 +134,6 @@ const DEFAULT_SETTINGS: Settings = {
   },
 };
 
-const RECENT_CYCLE_LIMIT = 1_000;
-let recentCycleDurations: number[] = [];
-
 let state: UiState = {
   rows: [],
   running: false,
@@ -207,6 +204,13 @@ function formatElapsed(ms: number): string {
 
 function applyEvent(event: WatcherEvent): void {
   switch (event.type) {
+    case "cycleMetrics":
+      update({
+        averageCycleSeconds: event.averageCycleSeconds,
+        onePercentLowSeconds: event.onePercentLowSeconds,
+      });
+      break;
+
     case "stateChanged": {
       // 列表本身以 cycleComplete 带来的快照为准，不拿这条事件去增量改 ——
       // 它是可丢弃的，用它做增量会让界面和引擎慢慢对不上。
@@ -220,9 +224,6 @@ function applyEvent(event: WatcherEvent): void {
       break;
 
     case "cycleStarted":
-      if (event.cycle === 1) {
-        recentCycleDurations = [];
-      }
       update({
         cycle: event.cycle,
         nextCheckAtMs: null,
@@ -234,29 +235,11 @@ function applyEvent(event: WatcherEvent): void {
       break;
 
     case "cycleComplete": {
-      if (event.startIntervalMs !== null) {
-        recentCycleDurations.push(event.startIntervalMs / 1_000);
-        if (recentCycleDurations.length > RECENT_CYCLE_LIMIT) {
-          recentCycleDurations.shift();
-        }
-      }
-      const averageCycleSeconds = recentCycleDurations.length > 0
-        ? recentCycleDurations.reduce((sum, durationSeconds) => sum + durationSeconds, 0) / recentCycleDurations.length
-        : null;
-      const slowestCount = Math.max(1, Math.ceil(recentCycleDurations.length * 0.01));
-      const onePercentLowSeconds = recentCycleDurations.length > 0
-        ? [...recentCycleDurations]
-            .sort((a, b) => a - b)
-            .slice(0, slowestCount)
-            .reduce((sum, durationSeconds) => sum + durationSeconds, 0) / slowestCount
-        : null;
       const recovered = event.healthy && state.trouble !== null;
       const previousBrowserFailure = describeBrowserFailure(state.rows);
       update({
         rows: event.snapshot,
         cycle: event.cycle,
-        averageCycleSeconds,
-        onePercentLowSeconds,
         nextCheckAtMs: Date.now() + event.nextCheckInSecs * 1_000,
         cooling: event.cooling,
         route: event.route ?? null,
@@ -287,9 +270,6 @@ function applyEvent(event: WatcherEvent): void {
 
     case "runStateChanged":
       if (state.running !== event.running) {
-        if (event.running) {
-          recentCycleDurations = [];
-        }
         update({
           running: event.running,
           cycle: event.running ? 0 : state.cycle,
@@ -513,9 +493,6 @@ export async function startWatching(): Promise<void> {
     await invoke("start_watching");
     const running = await invoke<boolean>("is_running");
     if (state.running !== running) {
-      if (running) {
-        recentCycleDurations = [];
-      }
       update({
         running,
         cycle: running ? 0 : state.cycle,
