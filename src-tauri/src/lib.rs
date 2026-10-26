@@ -1457,13 +1457,12 @@ async fn pump_events(app: AppHandle, mut events: tokio::sync::mpsc::Receiver<Eve
             Event::CycleComplete {
                 cycle,
                 elapsed_ms,
-                cycle_period_ms,
                 healthy,
                 snapshot,
                 ..
             } => checkout_audit(
                 "cycleComplete",
-                serde_json::json!({"cycle": cycle, "elapsedMs": elapsed_ms, "cyclePeriodMs": cycle_period_ms, "healthy": healthy, "targetCount": snapshot.len(), "inStockCount": snapshot.iter().filter(|s| s.availability.is_in_stock()).count()}),
+                serde_json::json!({"cycle": cycle, "elapsedMs": elapsed_ms, "healthy": healthy, "targetCount": snapshot.len(), "inStockCount": snapshot.iter().filter(|s| s.availability.is_in_stock()).count()}),
             ),
             Event::RunStateChanged { running } => {
                 checkout_audit("runStateChanged", serde_json::json!({"running": running}))
