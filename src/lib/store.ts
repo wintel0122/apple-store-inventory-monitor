@@ -220,9 +220,18 @@ function applyEvent(event: WatcherEvent): void {
       if (event.cycle === 1) {
         recentCycleDurations = [];
       }
+      if (event.startIntervalMs !== null) {
+        recentCycleDurations.push(event.startIntervalMs / 1_000);
+        if (recentCycleDurations.length > RECENT_CYCLE_LIMIT) {
+          recentCycleDurations.shift();
+        }
+      }
+      const averageCycleSeconds = recentCycleDurations.length > 0
+        ? recentCycleDurations.reduce((sum, durationSeconds) => sum + durationSeconds, 0) / recentCycleDurations.length
+        : null;
       update({
         cycle: event.cycle,
-        averageCycleSeconds: event.cycle === 1 ? null : state.averageCycleSeconds,
+        averageCycleSeconds,
         nextCheckAtMs: null,
         cooling: false,
       });
@@ -234,14 +243,6 @@ function applyEvent(event: WatcherEvent): void {
     case "cycleComplete": {
       const recovered = event.healthy && state.trouble !== null;
       const previousBrowserFailure = describeBrowserFailure(state.rows);
-      // 使用 Rust 引擎测得的本轮实际耗时，不使用前端收到事件的时间差。
-      recentCycleDurations.push(event.cyclePeriodMs / 1_000);
-      if (recentCycleDurations.length > RECENT_CYCLE_LIMIT) {
-        recentCycleDurations.shift();
-      }
-      const averageCycleSeconds = recentCycleDurations.length > 0
-        ? recentCycleDurations.reduce((sum, durationSeconds) => sum + durationSeconds, 0) / recentCycleDurations.length
-        : null;
       update({
         rows: event.snapshot,
         cycle: event.cycle,
