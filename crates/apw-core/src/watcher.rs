@@ -109,9 +109,6 @@ pub enum Event {
         /// 从开始调度到所有门店查询结束的耗时，包含限速与会话暖场。
         #[serde(rename = "elapsedMs")]
         elapsed_ms: u64,
-        /// 从本轮开始到下一轮计划开始的周期时长，包含查询、结果处理和等待。
-        #[serde(rename = "cyclePeriodMs")]
-        cycle_period_ms: u64,
         /// 本轮真正发往 Apple 的请求数；响应缓存命中不计入。
         #[serde(rename = "requestCount")]
         request_count: u32,
@@ -896,7 +893,6 @@ impl<F: Fetcher> Engine<F> {
         stats: CycleStats,
         schedule_hint: ScheduleHint,
     ) -> Duration {
-        let apply_started_at = Instant::now();
         let mut ok = 0usize;
         let mut problems = 0usize;
         let now = now_ms();
@@ -1000,13 +996,9 @@ impl<F: Fetcher> Engine<F> {
         let next_check_in_secs = delay
             .as_secs()
             .saturating_add(u64::from(delay.subsec_nanos() > 0));
-        let cycle_period_ms = elapsed_ms
-            .saturating_add(apply_started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
-            .saturating_add(delay.as_millis().min(u128::from(u64::MAX)) as u64);
         self.emit_critical(Event::CycleComplete {
             cycle,
             elapsed_ms,
-            cycle_period_ms,
             request_count: stats.request_count,
             reused_response_count: stats.reused_response_count,
             next_check_in_secs,
