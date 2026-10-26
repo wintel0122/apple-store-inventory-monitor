@@ -310,6 +310,8 @@ struct AppState {
     checkout: CheckoutRunner,
     catalog: Catalog,
     http: reqwest::Client,
+    /// 最近 1000 个实际轮次开始间隔（毫秒），供全节点冷却 Bark 提醒使用。
+    cycle_intervals_ms: StdMutex<Vec<u64>>,
     /// 设置的内存副本。有可用的持久化存储时，只在新设置成功落盘后更新。
     settings: RwLock<Settings>,
     /// 为 `None` 表示配置不可持久化（目录不可写，或上次读取失败已放弃写盘）。
@@ -1075,7 +1077,31 @@ async fn notify_all_routes_resting(app: &AppHandle) {
     }
 
     let keyword = settings.network.clash.node_filter.trim();
-    let body = format!("{}已全部冷却中", if keyword.is_empty() { "节点" } else { keyword });
+    let (average_seconds, fastest_one_percent_seconds) = state.cycle_intervals_ms
+        .lock()
+        .map(|samples| {
+            if samples.is_empty() {
+                return (None, None);
+            }
+            let average = samples.iter().map(|&ms| ms as f64).sum::<f64>() / samples.len() as f64 / 1_000.0;
+            let fastest_count = ((samples.len() as f64 * 0.01).ceil() as usize).max(1);
+            let mut sorted = samples.clone();
+            sorted.sort_unstable();
+            let fastest = sorted.iter().take(fastest_count).map(|&ms| ms as f64).sum::<f64>() / fastest_count as f64 / 1_000.0;
+            (Some(average), Some(fastest))
+        })
+        .unwrap_or((None, None));
+    let mut body = format!("{}已全部冷却中", if keyword.is_empty() { "节点" } else { keyword });
+    if let Some(seconds) = average_seconds {
+        body.push_str(&format!("\\n平均耗时：{seconds:.2} 秒"));
+    } else {
+        body.push_str("\\n平均耗时：暂无数据");
+    }
+    if let Some(seconds) = fastest_one_percent_seconds {
+        body.push_str(&format!("\\n最快 1%：{seconds:.2} 秒"));
+    } else {
+        body.push_str("\\n最快 1%：暂无数据");
+    }
     let push = BarkPush {
         level: settings.bark_options.level,
         sound: settings.bark_options.sound.clone(),
@@ -1473,6 +1499,17 @@ async fn pump_events(app: AppHandle, mut events: tokio::sync::mpsc::Receiver<Eve
             Event::StateChanged { .. } => {}
         }
 
+        if let Event::CycleComplete { start_interval_ms: Some(interval_ms), .. } = &event {
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(mut samples) = state.cycle_intervals_ms.lock() {
+                    samples.push(*interval_ms);
+                    if samples.len() > 1_000 {
+                        samples.remove(0);
+                    }
+                }
+            }
+        }
+
         if matches!(&event, Event::CycleComplete { .. }) {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -1755,6 +1792,7 @@ pub fn run() {
                 checkout: CheckoutRunner::new(),
                 catalog,
                 http: reqwest::Client::new(),
+                cycle_intervals_ms: StdMutex::new(Vec::new()),
                 settings: RwLock::new(settings),
                 store,
             });
