@@ -47,6 +47,8 @@ const MAX_LOG_LINES = 300;
 export interface UiState {
   rows: TargetState[];
   running: boolean;
+  /** 与监控日志一致的当前轮次。 */
+  cycle: number;
   /** 调度器给出的真实下一轮时间；保护冷却会反映在这里。 */
   nextCheckAtMs: number | null;
   /** 当前目标地区中是否仍有 Apple 请求保护冷却。 */
@@ -131,6 +133,7 @@ const DEFAULT_SETTINGS: Settings = {
 let state: UiState = {
   rows: [],
   running: false,
+  cycle: 0,
   nextCheckAtMs: null,
   cooling: false,
   route: null,
@@ -208,7 +211,7 @@ function applyEvent(event: WatcherEvent): void {
       break;
 
     case "cycleStarted":
-      update({ nextCheckAtMs: null, cooling: false });
+      update({ cycle: event.cycle, nextCheckAtMs: null, cooling: false });
       pushLog(
         `第 ${event.cycle} 轮开始查询：${event.storeCount} 家门店、${event.targetCount} 项监控。${event.cycle === 1 ? "首次使用时会先建立 Apple 查询会话，通常需要几秒。" : ""}`,
       );
@@ -219,6 +222,7 @@ function applyEvent(event: WatcherEvent): void {
       const previousBrowserFailure = describeBrowserFailure(state.rows);
       update({
         rows: event.snapshot,
+        cycle: event.cycle,
         nextCheckAtMs: Date.now() + event.nextCheckInSecs * 1_000,
         cooling: event.cooling,
         route: event.route ?? null,
@@ -251,6 +255,7 @@ function applyEvent(event: WatcherEvent): void {
       if (state.running !== event.running) {
         update({
           running: event.running,
+          cycle: event.running ? 0 : state.cycle,
           nextCheckAtMs: event.running ? state.nextCheckAtMs : null,
           cooling: event.running ? state.cooling : false,
         });
@@ -469,7 +474,7 @@ export async function startWatching(): Promise<void> {
     await invoke("start_watching");
     const running = await invoke<boolean>("is_running");
     if (state.running !== running) {
-      update({ running });
+      update({ running, cycle: running ? 0 : state.cycle });
       pushLog(running ? "已开始监控。" : "启动命令已返回，但监控引擎没有进入运行状态。");
     }
   } catch (err) {
