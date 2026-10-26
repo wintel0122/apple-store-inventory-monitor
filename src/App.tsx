@@ -1218,7 +1218,7 @@ export default function App() {
                       id="interval"
                       type="number"
                       min={1}
-                      step={0.1}
+                      step={0.01}
                       className="control-surface select-text pr-12 tabular-nums"
                       value={intervalValue}
                       onChange={(event) => setIntervalDraft(event.target.valueAsNumber)}
