@@ -1515,9 +1515,13 @@ async fn pump_events(app: AppHandle, mut events: tokio::sync::mpsc::Receiver<Eve
             Event::RunStateChanged { running } => {
                 if *running {
                     if let Some(state) = app.try_state::<AppState>() {
-                        if let Ok(mut samples) = state.cycle_intervals_ms.lock() {
-                            samples.clear();
+                        if let Ok(mut metrics) = state.cycle_metrics.lock() {
+                            metrics.reset();
                         }
+                        let _ = app.emit("cycleMetrics", serde_json::json!({
+                            "averageCycleSeconds": null,
+                            "onePercentLowSeconds": null
+                        }));
                     }
                 }
                 checkout_audit("runStateChanged", serde_json::json!({"running": running}))
@@ -1530,11 +1534,12 @@ async fn pump_events(app: AppHandle, mut events: tokio::sync::mpsc::Receiver<Eve
 
         if let Event::CycleComplete { start_interval_ms: Some(interval_ms), .. } = &event {
             if let Some(state) = app.try_state::<AppState>() {
-                if let Ok(mut samples) = state.cycle_intervals_ms.lock() {
-                    samples.push(*interval_ms);
-                    if samples.len() > 1_000 {
-                        samples.remove(0);
-                    }
+                if let Ok(mut metrics) = state.cycle_metrics.lock() {
+                    metrics.record(*interval_ms);
+                    let _ = app.emit("cycleMetrics", serde_json::json!({
+                        "averageCycleSeconds": metrics.average_seconds,
+                        "onePercentLowSeconds": metrics.fastest_one_percent_seconds
+                    }));
                 }
             }
         }
