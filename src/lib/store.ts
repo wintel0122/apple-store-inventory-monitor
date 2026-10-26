@@ -51,6 +51,8 @@ export interface UiState {
   cycle: number;
   /** 从第一轮开始到最近已完成轮次的平均秒数（包含轮间等待）。 */
   averageCycleSeconds: number | null;
+  /** 最近 1000 个实际轮次间隔中，最慢 1% 轮次的平均秒数。 */
+  onePercentLowSeconds: number | null;
   /** 调度器给出的真实下一轮时间；保护冷却会反映在这里。 */
   nextCheckAtMs: number | null;
   /** 当前目标地区中是否仍有 Apple 请求保护冷却。 */
@@ -140,6 +142,7 @@ let state: UiState = {
   running: false,
   cycle: 0,
   averageCycleSeconds: null,
+  onePercentLowSeconds: null,
   nextCheckAtMs: null,
   cooling: false,
   route: null,
@@ -240,12 +243,20 @@ function applyEvent(event: WatcherEvent): void {
       const averageCycleSeconds = recentCycleDurations.length > 0
         ? recentCycleDurations.reduce((sum, durationSeconds) => sum + durationSeconds, 0) / recentCycleDurations.length
         : null;
+      const slowestCount = Math.max(1, Math.ceil(recentCycleDurations.length * 0.01));
+      const onePercentLowSeconds = recentCycleDurations.length > 0
+        ? [...recentCycleDurations]
+            .sort((a, b) => b - a)
+            .slice(0, slowestCount)
+            .reduce((sum, durationSeconds) => sum + durationSeconds, 0) / slowestCount
+        : null;
       const recovered = event.healthy && state.trouble !== null;
       const previousBrowserFailure = describeBrowserFailure(state.rows);
       update({
         rows: event.snapshot,
         cycle: event.cycle,
         averageCycleSeconds,
+        onePercentLowSeconds,
         nextCheckAtMs: Date.now() + event.nextCheckInSecs * 1_000,
         cooling: event.cooling,
         route: event.route ?? null,
@@ -283,6 +294,7 @@ function applyEvent(event: WatcherEvent): void {
           running: event.running,
           cycle: event.running ? 0 : state.cycle,
           averageCycleSeconds: event.running ? null : state.averageCycleSeconds,
+          onePercentLowSeconds: event.running ? null : state.onePercentLowSeconds,
           nextCheckAtMs: event.running ? state.nextCheckAtMs : null,
           cooling: event.running ? state.cooling : false,
         });
@@ -508,6 +520,7 @@ export async function startWatching(): Promise<void> {
         running,
         cycle: running ? 0 : state.cycle,
         averageCycleSeconds: running ? null : state.averageCycleSeconds,
+        onePercentLowSeconds: running ? null : state.onePercentLowSeconds,
       });
       pushLog(running ? "已开始监控。" : "启动命令已返回，但监控引擎没有进入运行状态。");
     }
