@@ -219,18 +219,17 @@ fn 轮询事件携带前端可用的轮次与耗时() {
         cycle: 2,
         store_count: 1,
         target_count: 3,
-        start_interval_ms: Some(62_150),
     });
     assert_eq!(started.get("type"), Some(&json!("cycleStarted")));
     assert_eq!(started.get("cycle"), Some(&json!(2)));
     assert_eq!(started.get("storeCount"), Some(&json!(1)));
     assert_eq!(started.get("targetCount"), Some(&json!(3)));
-    assert_eq!(started.get("startIntervalMs"), Some(&json!(62_150)));
     assert!(started.get("store_count").is_none());
 
     let completed = to_value(&Event::CycleComplete {
         cycle: 2,
         elapsed_ms: 2_150,
+        start_interval_ms: Some(62_150),
         request_count: 1,
         reused_response_count: 2,
         next_check_in_secs: 60,
@@ -242,6 +241,7 @@ fn 轮询事件携带前端可用的轮次与耗时() {
     assert_eq!(completed.get("type"), Some(&json!("cycleComplete")));
     assert_eq!(completed.get("cycle"), Some(&json!(2)));
     assert_eq!(completed.get("elapsedMs"), Some(&json!(2_150)));
+    assert_eq!(completed.get("startIntervalMs"), Some(&json!(62_150)));
     assert_eq!(completed.get("requestCount"), Some(&json!(1)));
     assert_eq!(completed.get("reusedResponseCount"), Some(&json!(2)));
     assert_eq!(completed.get("nextCheckInSecs"), Some(&json!(60)));
