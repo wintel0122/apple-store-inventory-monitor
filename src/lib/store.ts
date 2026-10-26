@@ -231,6 +231,7 @@ function applyEvent(event: WatcherEvent): void {
         : null;
       update({
         cycle: event.cycle,
+        averageCycleSeconds,
         nextCheckAtMs: null,
         cooling: false,
       });
