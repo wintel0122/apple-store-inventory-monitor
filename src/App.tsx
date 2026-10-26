@@ -590,7 +590,7 @@ export default function App() {
 
   const cyclePrefix = ui.cycle > 0 ? `第 ${ui.cycle} 轮 · ` : "";
   const averageCyclePrefix = ui.averageCycleSeconds !== null
-    ? `近 15 分钟每轮平均 ${ui.averageCycleSeconds.toFixed(2)} 秒 · `
+    ? `平均 ${ui.averageCycleSeconds.toFixed(2)} 秒 · `
     : "";
 
   const storeOptions = useMemo(
