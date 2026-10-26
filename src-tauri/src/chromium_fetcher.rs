@@ -1937,7 +1937,7 @@ impl QueryState {
             // 放在结果处理之后，确保第 30 次请求触发的最高冷却不会被同次成功清除。
             if self.rotating()
                 && let Some(route) = requested_route.as_deref()
-                && self.routes.record_usage(route, region_site(region), Instant::now())
+                && self.routes.record_usage(route, &region_site(region), Instant::now())
             {
                 eprintln!(
                     "Clash 节点 {route} 在 {} 连续使用达到 {} 次，进入最高冷却档（{} 分钟）",
