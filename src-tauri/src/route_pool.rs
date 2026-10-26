@@ -199,15 +199,33 @@ impl RoutePool {
         self.unreachable.remove(route);
     }
 
-    /// 线路是否在任一站点冷却或暂时连不通。
-    pub fn is_resting(&self, route: &str, now: Instant) -> bool {
+    /// 返回节点当前有效的最高冷却等级及该记录的剩余时间。
+    /// 同一节点可能在多个 Apple 站点分别冷却，界面展示等级最高的一项。
+    pub fn cooldown_status(&self, route: &str, now: Instant) -> Option<(usize, Duration)> {
+        self.cooldowns
+            .iter()
+            .filter(|((name, _), cooldown)| name == route && cooldown.until > now)
+            .max_by_key(|(_, cooldown)| (cooldown.level, cooldown.until))
+            .map(|(_, cooldown)| {
+                (
+                    cooldown.level + 1,
+                    cooldown.until.saturating_duration_since(now),
+                )
+            })
+    }
+
+    /// 节点暂时无法连接时的剩余跳过时间。
+    pub fn unreachable_remaining(&self, route: &str, now: Instant) -> Option<Duration> {
         self.unreachable
             .get(route)
-            .is_some_and(|until| *until > now)
-            || self
-                .cooldowns
-                .iter()
-                .any(|((name, _), cooldown)| name == route && cooldown.until > now)
+            .map(|until| until.saturating_duration_since(now))
+            .filter(|remaining| !remaining.is_zero())
+    }
+
+    /// 线路是否在任一站点冷却或暂时连不通。
+    pub fn is_resting(&self, route: &str, now: Instant) -> bool {
+        self.cooldown_status(route, now).is_some()
+            || self.unreachable_remaining(route, now).is_some()
     }
 
     /// 用户要求立即重试：结束所有等待，但保留档位。探测若仍被拒，会继续升档。
