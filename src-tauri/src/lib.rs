@@ -13,7 +13,7 @@ use std::sync::{Mutex as StdMutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use apw_core::catalog::Catalog;
-use apw_core::config::{ClashSettings, MIN_INTERVAL_SECONDS, OpenOnHit, Settings, SettingsStore};
+use apw_core::config::{ClashSettings, DEFAULT_INTERVAL_SECONDS, MIN_INTERVAL_SECONDS, OpenOnHit, Settings, SettingsStore};
 use apw_core::model::{Category, Product, REGIONS, Store, Target, region_by_locale};
 use apw_core::notify::{Bark, BarkPush, Multi, Notification, Notifier, Sound};
 use apw_core::watcher::{Event, TargetState, Watcher, WatcherConfig};
