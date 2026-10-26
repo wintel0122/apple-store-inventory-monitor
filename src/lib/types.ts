@@ -281,7 +281,6 @@ export type WatcherEvent =
       type: "cycleComplete";
       cycle: number;
       elapsedMs: number;
-      cyclePeriodMs: number;
       requestCount: number;
       reusedResponseCount: number;
       nextCheckInSecs: number;
