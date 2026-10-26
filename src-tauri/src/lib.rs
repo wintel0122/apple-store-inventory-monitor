@@ -1075,7 +1075,7 @@ async fn notify_all_routes_resting(app: &AppHandle) {
     }
 
     let keyword = settings.network.clash.node_filter.trim();
-    let title = format!("{}已全部冷却中", if keyword.is_empty() { "全部节点" } else { keyword });
+    let body = format!("{}已全部冷却中", if keyword.is_empty() { "节点" } else { keyword });
     let push = BarkPush {
         level: settings.bark_options.level,
         sound: settings.bark_options.sound.clone(),
@@ -1083,7 +1083,7 @@ async fn notify_all_routes_resting(app: &AppHandle) {
         call: settings.bark_options.call,
     };
     let bark = Bark::new(settings.bark_url, state.http.clone()).with_push(push);
-    if let Err(error) = bark.notify(&Notification::new(title, "")).await {
+    if let Err(error) = bark.notify(&Notification::new("节点冷却提醒", body)).await {
         let _ = app.emit(NOTICE_CHANNEL, format!("发送全节点冷却 Bark 提醒时出错：{error}"));
     }
 }
