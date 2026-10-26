@@ -1218,11 +1218,12 @@ export default function App() {
                       id="interval"
                       type="number"
                       min={1}
+                      step={0.1}
                       className="control-surface select-text pr-12 tabular-nums"
                       value={intervalValue}
                       onChange={(event) => setIntervalDraft(event.target.valueAsNumber)}
                       onBlur={() => {
-                        const seconds = Number.isFinite(intervalValue) ? Math.round(intervalValue) : 30;
+                        const seconds = Number.isFinite(intervalValue) ? Math.max(1, intervalValue) : 30;
                         setIntervalDraft(null);
                         void setIntervalSeconds(seconds);
                       }}
