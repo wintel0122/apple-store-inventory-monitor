@@ -134,6 +134,10 @@ const DEFAULT_SETTINGS: Settings = {
   },
 };
 
+const RECENT_CYCLE_WINDOW_MS = 15 * 60 * 1_000;
+let activeCycleStartedAtMs: number | null = null;
+let recentCycleDurations: Array<{ completedAtMs: number; durationSeconds: number }> = [];
+
 let state: UiState = {
   rows: [],
   running: false,
@@ -217,9 +221,13 @@ function applyEvent(event: WatcherEvent): void {
       break;
 
     case "cycleStarted":
+      activeCycleStartedAtMs = Date.now();
+      if (event.cycle === 1) {
+        recentCycleDurations = [];
+      }
       update({
         cycle: event.cycle,
-        firstCycleStartedAtMs: event.cycle === 1 ? Date.now() : state.firstCycleStartedAtMs,
+        firstCycleStartedAtMs: event.cycle === 1 ? activeCycleStartedAtMs : state.firstCycleStartedAtMs,
         averageCycleSeconds: event.cycle === 1 ? null : state.averageCycleSeconds,
         nextCheckAtMs: null,
         cooling: false,
@@ -232,9 +240,19 @@ function applyEvent(event: WatcherEvent): void {
     case "cycleComplete": {
       const recovered = event.healthy && state.trouble !== null;
       const previousBrowserFailure = describeBrowserFailure(state.rows);
-      const firstCycleStartedAtMs = state.firstCycleStartedAtMs;
-      const averageCycleSeconds = firstCycleStartedAtMs !== null && event.cycle > 0
-        ? Math.max(0, Date.now() - firstCycleStartedAtMs) / event.cycle / 1_000
+      const completedAtMs = Date.now();
+      if (activeCycleStartedAtMs !== null) {
+        recentCycleDurations.push({
+          completedAtMs,
+          durationSeconds: Math.max(0, completedAtMs - activeCycleStartedAtMs) / 1_000,
+        });
+      }
+      recentCycleDurations = recentCycleDurations.filter(
+        (cycle) => completedAtMs - cycle.completedAtMs <= RECENT_CYCLE_WINDOW_MS,
+      );
+      activeCycleStartedAtMs = null;
+      const averageCycleSeconds = recentCycleDurations.length > 0
+        ? recentCycleDurations.reduce((sum, cycle) => sum + cycle.durationSeconds, 0) / recentCycleDurations.length
         : null;
       update({
         rows: event.snapshot,
@@ -270,6 +288,10 @@ function applyEvent(event: WatcherEvent): void {
 
     case "runStateChanged":
       if (state.running !== event.running) {
+        if (event.running) {
+          activeCycleStartedAtMs = null;
+          recentCycleDurations = [];
+        }
         update({
           running: event.running,
           cycle: event.running ? 0 : state.cycle,
@@ -493,6 +515,10 @@ export async function startWatching(): Promise<void> {
     await invoke("start_watching");
     const running = await invoke<boolean>("is_running");
     if (state.running !== running) {
+      if (running) {
+        activeCycleStartedAtMs = null;
+        recentCycleDurations = [];
+      }
       update({
         running,
         cycle: running ? 0 : state.cycle,
