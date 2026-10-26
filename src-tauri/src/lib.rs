@@ -839,12 +839,12 @@ async fn set_targets(
 }
 
 #[tauri::command]
-async fn set_interval(state: tauri::State<'_, AppState>, seconds: u64) -> Result<u64, String> {
-    let secs = seconds.max(MIN_INTERVAL_SECONDS);
+async fn set_interval(state: tauri::State<'_, AppState>, seconds: f64) -> Result<f64, String> {
+    let secs = if seconds.is_finite() { seconds.max(MIN_INTERVAL_SECONDS) } else { DEFAULT_INTERVAL_SECONDS };
     let mut next = state.settings_snapshot();
     next.interval_seconds = secs;
     state.put_settings(next)?;
-    state.watcher.set_interval(Duration::from_secs(secs)).await;
+    state.watcher.set_interval(Duration::from_millis((secs * 1_000.0).round() as u64)).await;
     Ok(secs)
 }
 
