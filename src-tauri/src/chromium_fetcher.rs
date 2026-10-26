@@ -1285,6 +1285,12 @@ pub struct RouteInfo {
     pub delay: Option<u32>,
     /// 是否因被 Apple 拒绝而冷却，或暂时连不通。
     pub resting: bool,
+    /// 当前有效冷却的最高档位（1-4）；纯连接失败时为 None。
+    pub cooldown_level: Option<usize>,
+    /// 当前显示冷却记录的剩余秒数；纯连接失败时为 None。
+    pub cooldown_remaining_secs: Option<u64>,
+    /// 纯连接失败时的剩余暂时跳过秒数。
+    pub unreachable_remaining_secs: Option<u64>,
 }
 
 /// 可交给核心监控引擎的 Chromium 查询器。
@@ -2063,10 +2069,17 @@ impl AppleChromiumFetcher {
             nodes: nodes
                 .nodes
                 .into_iter()
-                .map(|name| RouteInfo {
-                    delay: delays.get(&name).copied(),
-                    resting: state.routes.is_resting(&name, now),
-                    name,
+                .map(|name| {
+                    let cooldown = state.routes.cooldown_status(&name, now);
+                    let unreachable = state.routes.unreachable_remaining(&name, now);
+                    RouteInfo {
+                        delay: delays.get(&name).copied(),
+                        resting: cooldown.is_some() || unreachable.is_some(),
+                        cooldown_level: cooldown.map(|(level, _)| level),
+                        cooldown_remaining_secs: cooldown.map(|(_, remaining)| remaining.as_secs()),
+                        unreachable_remaining_secs: unreachable.map(|remaining| remaining.as_secs()),
+                        name,
+                    }
                 })
                 .collect(),
         })
