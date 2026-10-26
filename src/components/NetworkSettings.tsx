@@ -232,10 +232,33 @@ function nodeFromRoute(route: string | null): string | null {
   return node && node !== "尚未选定" ? node : null;
 }
 
-function nodeLabel(name: string, delay: number | null, resting: boolean): string {
+function formatRemainingSeconds(seconds: number): string {
+  const total = Math.max(0, Math.ceil(seconds));
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function nodeLabel(
+  name: string,
+  delay: number | null,
+  resting: boolean,
+  cooldownLevel: number | null | undefined,
+  cooldownRemainingSecs: number | null | undefined,
+  unreachableRemainingSecs: number | null | undefined,
+  elapsedSecs: number,
+): string {
   const display = name.replace(/^APW·/, "");
   const status = name === "DIRECT" ? "家宽直连" : delay === null ? "测速超时" : `${delay} ms`;
-  return `${display} · ${status}${resting ? " · 冷却中" : ""}`;
+  let cooldownLabel = "";
+  if (cooldownLevel != null && cooldownRemainingSecs != null) {
+    cooldownLabel = ` · 冷却 Lv.${cooldownLevel} · 剩余 ${formatRemainingSeconds(cooldownRemainingSecs - elapsedSecs)}`;
+  } else if (unreachableRemainingSecs != null) {
+    cooldownLabel = ` · 连接暂不可用 · 剩余 ${formatRemainingSeconds(unreachableRemainingSecs - elapsedSecs)}`;
+  } else if (resting) {
+    cooldownLabel = " · 暂不可用";
+  }
+  return `${display} · ${status}${cooldownLabel}`;
 }
 
 function NodePicker({
@@ -253,6 +276,8 @@ function NodePicker({
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [current, setCurrent] = useState<string | null>(null);
+  const [listFetchedAt, setListFetchedAt] = useState(Date.now());
+  const [clockMs, setClockMs] = useState(Date.now());
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -262,6 +287,7 @@ function NodePicker({
     } else {
       setError(null);
       setList(result);
+      setListFetchedAt(Date.now());
       setCurrent(result.now);
     }
     setLoading(false);
@@ -270,6 +296,13 @@ function NodePicker({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // 用本地经过时间递减后端返回的剩余秒数，让选择框中的倒计时持续更新。
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockMs(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const elapsedSecs = Math.floor((clockMs - listFetchedAt) / 1_000);
 
   // 自动切换后跟上每轮实际使用的节点。
   const routeNode = nodeFromRoute(route);
@@ -280,7 +313,15 @@ function NodePicker({
 
   const options = (list?.nodes ?? []).map((node) => ({
     value: node.name,
-    label: nodeLabel(node.name, node.delay, node.resting),
+    label: nodeLabel(
+      node.name,
+      node.delay,
+      node.resting,
+      node.cooldownLevel,
+      node.cooldownRemainingSecs,
+      node.unreachableRemainingSecs,
+      elapsedSecs,
+    ),
   }));
   const reachable = list?.nodes.filter((node) => node.name === "DIRECT" || node.delay !== null).length ?? 0;
 
