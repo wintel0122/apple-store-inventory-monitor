@@ -276,7 +276,7 @@ export interface Trouble {
 export type WatcherEvent =
   | { type: "stateChanged"; state: TargetState }
   | { type: "inStock"; state: TargetState }
-  | { type: "cycleStarted"; cycle: number; storeCount: number; targetCount: number }
+  | { type: "cycleStarted"; cycle: number; storeCount: number; targetCount: number; startIntervalMs: number | null }
   | {
       type: "cycleComplete";
       cycle: number;
