@@ -246,7 +246,7 @@ function applyEvent(event: WatcherEvent): void {
       const slowestCount = Math.max(1, Math.ceil(recentCycleDurations.length * 0.01));
       const onePercentLowSeconds = recentCycleDurations.length > 0
         ? [...recentCycleDurations]
-            .sort((a, b) => b - a)
+            .sort((a, b) => a - b)
             .slice(0, slowestCount)
             .reduce((sum, durationSeconds) => sum + durationSeconds, 0) / slowestCount
         : null;
