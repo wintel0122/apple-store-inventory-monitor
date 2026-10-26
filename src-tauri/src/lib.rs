@@ -10,7 +10,7 @@
 
 use std::io::Write;
 use std::sync::{Mutex as StdMutex, OnceLock, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use apw_core::catalog::Catalog;
 use apw_core::config::{ClashSettings, MIN_INTERVAL_SECONDS, OpenOnHit, Settings, SettingsStore};
@@ -1047,6 +1047,47 @@ async fn test_notify(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// 全节点冷却专用推送：独立限频，不占用到货和结账通知的通道。
+/// 仅保留在当前进程内，程序完全退出后自动重置。
+async fn notify_all_routes_resting(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let settings = state.settings_snapshot();
+    if settings.network.mode != apw_core::config::NetworkMode::Clash
+        || settings.bark_url.trim().is_empty()
+        || state.fetcher.all_routes_resting().await != Some(true)
+    {
+        return;
+    }
+
+    static LAST_ALERT: OnceLock<StdMutex<Option<Instant>>> = OnceLock::new();
+    const QUIET_PERIOD: Duration = Duration::from_secs(15 * 60);
+    let now = Instant::now();
+    let throttle = LAST_ALERT.get_or_init(|| StdMutex::new(None));
+    {
+        let Ok(mut last) = throttle.lock() else { return };
+        if last.is_some_and(|at| now.saturating_duration_since(at) < QUIET_PERIOD) {
+            return;
+        }
+        // 发送尝试即触发限频，失败也不会短时间反复发送。
+        *last = Some(now);
+    }
+
+    let keyword = settings.network.clash.node_filter.trim();
+    let title = format!("{}已全部冷却中", if keyword.is_empty() { "全部节点" } else { keyword });
+    let push = BarkPush {
+        level: settings.bark_options.level,
+        sound: settings.bark_options.sound.clone(),
+        volume: settings.bark_options.volume,
+        call: settings.bark_options.call,
+    };
+    let bark = Bark::new(settings.bark_url, state.http.clone()).with_push(push);
+    if let Err(error) = bark.notify(&Notification::new(title, "")).await {
+        let _ = app.emit(NOTICE_CHANNEL, format!("发送全节点冷却 Bark 提醒时出错：{error}"));
+    }
+}
+
 /// 按用户设置发送提示音和 Bark 提醒。
 async fn dispatch_notification(
     app: &AppHandle,
@@ -1429,6 +1470,13 @@ async fn pump_events(app: AppHandle, mut events: tokio::sync::mpsc::Receiver<Eve
                 checkout_audit("trouble", serde_json::json!({"needsInspection": true}))
             }
             Event::StateChanged { .. } => {}
+        }
+
+        if matches!(&event, Event::CycleComplete { .. }) {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                notify_all_routes_resting(&app).await;
+            });
         }
 
         if let Event::InStock { state } = &event {
