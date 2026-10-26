@@ -1907,6 +1907,8 @@ impl QueryState {
         let mut attempts = 0usize;
         loop {
             self.prepare_route(region).await?;
+            // 记录本次真实请求使用的节点；结果处理可能切换 active，因此必须在请求前捕获。
+            let requested_route = self.routes.active().map(str::to_string);
             let result = {
                 let QueryState { session, gate, .. } = &mut *self;
                 session
@@ -1931,6 +1933,19 @@ impl QueryState {
                 }
                 Err(_) => false,
             };
+            // 每次实际请求都计数（包括失败请求），按节点 + Apple 站点独立累计。
+            // 放在结果处理之后，确保第 30 次请求触发的最高冷却不会被同次成功清除。
+            if self.rotating()
+                && let Some(route) = requested_route.as_deref()
+                && self.routes.record_usage(route, region_site(region), Instant::now())
+            {
+                eprintln!(
+                    "Clash 节点 {route} 在 {} 连续使用达到 {} 次，进入最高冷却档（{} 分钟）",
+                    region_site(region),
+                    crate::route_pool::USES_BEFORE_MAX_COOLDOWN,
+                    crate::route_pool::COOLDOWN_STEPS[3].as_secs() / 60
+                );
+            }
             if switch && attempts < self.routes.routes().len().max(1) * 2 {
                 continue;
             }
