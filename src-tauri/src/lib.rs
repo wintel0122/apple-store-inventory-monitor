@@ -1449,20 +1449,20 @@ async fn pump_events(app: AppHandle, mut events: tokio::sync::mpsc::Receiver<Eve
                 cycle,
                 store_count,
                 target_count,
-                start_interval_ms,
             } => checkout_audit(
                 "cycleStarted",
-                serde_json::json!({"cycle": cycle, "storeCount": store_count, "targetCount": target_count, "startIntervalMs": start_interval_ms}),
+                serde_json::json!({"cycle": cycle, "storeCount": store_count, "targetCount": target_count}),
             ),
             Event::CycleComplete {
                 cycle,
                 elapsed_ms,
+                start_interval_ms,
                 healthy,
                 snapshot,
                 ..
             } => checkout_audit(
                 "cycleComplete",
-                serde_json::json!({"cycle": cycle, "elapsedMs": elapsed_ms, "healthy": healthy, "targetCount": snapshot.len(), "inStockCount": snapshot.iter().filter(|s| s.availability.is_in_stock()).count()}),
+                serde_json::json!({"cycle": cycle, "elapsedMs": elapsed_ms, "startIntervalMs": start_interval_ms, "healthy": healthy, "targetCount": snapshot.len(), "inStockCount": snapshot.iter().filter(|s| s.availability.is_in_stock()).count()}),
             ),
             Event::RunStateChanged { running } => {
                 checkout_audit("runStateChanged", serde_json::json!({"running": running}))
