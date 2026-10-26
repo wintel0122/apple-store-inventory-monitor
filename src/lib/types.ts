@@ -220,6 +220,12 @@ export interface RouteInfo {
   delay: number | null;
   /** 被 Apple 拒绝后冷却中，或暂时连不通。 */
   resting: boolean;
+  /** 当前有效冷却的最高档位（1-4）；纯连接失败时为 null。 */
+  cooldownLevel?: number | null;
+  /** 当前显示冷却记录的剩余秒数；纯连接失败时为 null。 */
+  cooldownRemainingSecs?: number | null;
+  /** 纯连接失败时的剩余暂时跳过秒数。 */
+  unreachableRemainingSecs?: number | null;
 }
 
 export interface RouteList {
