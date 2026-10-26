@@ -592,6 +592,9 @@ export default function App() {
   const averageCyclePrefix = ui.averageCycleSeconds !== null
     ? `平均 ${ui.averageCycleSeconds.toFixed(2)} 秒 · `
     : "";
+  const onePercentLowPrefix = ui.onePercentLowSeconds !== null
+    ? `1% Low ${ui.onePercentLowSeconds.toFixed(2)} 秒 · `
+    : "";
 
   const storeOptions = useMemo(
     () => ui.stores.map((store) => ({ value: store.number, label: store.title })),
@@ -790,7 +793,7 @@ export default function App() {
                   aria-hidden="true"
                 />
                 <span className="hidden text-xs text-muted-foreground sm:inline">监控状态</span>
-                <span className="text-sm font-medium tabular-nums">{ui.running ? `${cyclePrefix}${averageCyclePrefix}${browserFailure !== null ? browserRunningLabel : runningLabel}` : "已暂停"}</span>
+                <span className="text-sm font-medium tabular-nums">{ui.running ? `${cyclePrefix}${averageCyclePrefix}${onePercentLowPrefix}${browserFailure !== null ? browserRunningLabel : runningLabel}` : "已暂停"}</span>
               </div>
               {ui.running && ui.cooling && (
                 <Button
