@@ -81,10 +81,10 @@ impl<'de> Deserialize<'de> for OpenOnHit {
 /// 上游写死 500 毫秒一轮，即每个门店每秒两次请求。这个频率对一个公开的商品
 /// 查询接口来说过高，是触发风控的直接原因，也是上游 issue 里 503 / 541 反复
 /// 出现的背景。30 秒足够应付抢购，同时不会把自己送进黑名单。
-pub const DEFAULT_INTERVAL_SECONDS: u64 = 30;
+pub const DEFAULT_INTERVAL_SECONDS: f64 = 30.0;
 
 /// 允许设置的间隔下限（秒）。频率交给用户决定，只排除 0 秒的无间隔连发。
-pub const MIN_INTERVAL_SECONDS: u64 = 1;
+pub const MIN_INTERVAL_SECONDS: f64 = 1.0;
 
 /// 读取设置文件时接受的字节上限。
 ///
@@ -413,7 +413,7 @@ impl BarkOptions {
 /// 容器级 `#[serde(default)]` 是有意加的：磁盘上的文件可能来自旧版本、少几个
 /// 字段。缺字段应当取**默认值**，而不是取该类型的零值 —— 否则一份老配置读上来
 /// 会把 `soundEnabled` 变成 `false`，用户什么都没改，提示音却自己关了。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     /// 上次选择的地区 locale。
@@ -423,7 +423,7 @@ pub struct Settings {
     /// 统一的送货目的地区。为空时保留 Apple 按门店地区给出的估算。
     pub delivery_region: Option<DeliveryRegion>,
     /// 每轮查询之间的间隔秒数。
-    pub interval_seconds: u64,
+    pub interval_seconds: f64,
     /// 为空表示不启用 Bark 推送。
     pub bark_url: String,
     /// 按商品零件号覆盖默认 Bark；同一型号在不同门店共用一条路由。
@@ -488,7 +488,7 @@ impl Settings {
 
         // 注意是「小于下限就回到默认值」，不是「夹到下限」。0 秒多半是没填或填错，
         // 退回 30 秒才是安全的那一侧。
-        if self.interval_seconds < MIN_INTERVAL_SECONDS {
+        if !self.interval_seconds.is_finite() || self.interval_seconds < MIN_INTERVAL_SECONDS {
             self.interval_seconds = DEFAULT_INTERVAL_SECONDS;
         }
 
@@ -590,7 +590,7 @@ impl Settings {
 
     /// 查询间隔。
     pub fn interval(&self) -> Duration {
-        Duration::from_secs(self.interval_seconds)
+        Duration::from_millis((self.interval_seconds * 1_000.0).round() as u64)
     }
 
     /// 返回某个型号实际使用的 Bark 地址：专属地址优先，否则沿用默认地址。
@@ -996,7 +996,8 @@ impl LegacySettings {
             delivery_region: None,
             interval_seconds: self
                 .interval_seconds
-                .and_then(|v| u64::try_from(v).ok())
+                .filter(|&v| v >= 1)
+                .map(|v| v as f64)
                 .unwrap_or(fallback.interval_seconds),
             bark_url: self.bark_url.unwrap_or(fallback.bark_url),
             product_bark_urls: BTreeMap::new(),
