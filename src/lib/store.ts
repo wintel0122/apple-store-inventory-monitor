@@ -49,8 +49,6 @@ export interface UiState {
   running: boolean;
   /** 与监控日志一致的当前轮次。 */
   cycle: number;
-  /** 第一轮开始的毫秒时间戳，按本次监控会话计。 */
-  firstCycleStartedAtMs: number | null;
   /** 从第一轮开始到最近已完成轮次的平均秒数（包含轮间等待）。 */
   averageCycleSeconds: number | null;
   /** 调度器给出的真实下一轮时间；保护冷却会反映在这里。 */
@@ -135,14 +133,12 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 const RECENT_CYCLE_LIMIT = 1_000;
-let activeCycleStartedAtMs: number | null = null;
 let recentCycleDurations: number[] = [];
 
 let state: UiState = {
   rows: [],
   running: false,
   cycle: 0,
-  firstCycleStartedAtMs: null,
   averageCycleSeconds: null,
   nextCheckAtMs: null,
   cooling: false,
@@ -221,13 +217,11 @@ function applyEvent(event: WatcherEvent): void {
       break;
 
     case "cycleStarted":
-      activeCycleStartedAtMs = Date.now();
       if (event.cycle === 1) {
         recentCycleDurations = [];
       }
       update({
         cycle: event.cycle,
-        firstCycleStartedAtMs: event.cycle === 1 ? activeCycleStartedAtMs : state.firstCycleStartedAtMs,
         averageCycleSeconds: event.cycle === 1 ? null : state.averageCycleSeconds,
         nextCheckAtMs: null,
         cooling: false,
@@ -240,14 +234,11 @@ function applyEvent(event: WatcherEvent): void {
     case "cycleComplete": {
       const recovered = event.healthy && state.trouble !== null;
       const previousBrowserFailure = describeBrowserFailure(state.rows);
-      const completedAtMs = Date.now();
-      if (activeCycleStartedAtMs !== null) {
-        recentCycleDurations.push(Math.max(0, completedAtMs - activeCycleStartedAtMs) / 1_000);
-        if (recentCycleDurations.length > RECENT_CYCLE_LIMIT) {
-          recentCycleDurations.shift();
-        }
+      // 使用 Rust 引擎测得的本轮实际耗时，不使用前端收到事件的时间差。
+      recentCycleDurations.push(event.elapsedMs / 1_000);
+      if (recentCycleDurations.length > RECENT_CYCLE_LIMIT) {
+        recentCycleDurations.shift();
       }
-      activeCycleStartedAtMs = null;
       const averageCycleSeconds = recentCycleDurations.length > 0
         ? recentCycleDurations.reduce((sum, durationSeconds) => sum + durationSeconds, 0) / recentCycleDurations.length
         : null;
@@ -286,7 +277,6 @@ function applyEvent(event: WatcherEvent): void {
     case "runStateChanged":
       if (state.running !== event.running) {
         if (event.running) {
-          activeCycleStartedAtMs = null;
           recentCycleDurations = [];
         }
         update({
@@ -513,7 +503,6 @@ export async function startWatching(): Promise<void> {
     const running = await invoke<boolean>("is_running");
     if (state.running !== running) {
       if (running) {
-        activeCycleStartedAtMs = null;
         recentCycleDurations = [];
       }
       update({
