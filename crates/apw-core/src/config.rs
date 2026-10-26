@@ -76,14 +76,14 @@ impl<'de> Deserialize<'de> for OpenOnHit {
     }
 }
 
-/// 默认查询间隔（秒）。
+/// 默认查询间隔（秒），支持小数。
 ///
 /// 上游写死 500 毫秒一轮，即每个门店每秒两次请求。这个频率对一个公开的商品
 /// 查询接口来说过高，是触发风控的直接原因，也是上游 issue 里 503 / 541 反复
 /// 出现的背景。30 秒足够应付抢购，同时不会把自己送进黑名单。
 pub const DEFAULT_INTERVAL_SECONDS: f64 = 30.0;
 
-/// 允许设置的间隔下限（秒）。频率交给用户决定，只排除 0 秒的无间隔连发。
+/// 允许设置的间隔下限（秒）。支持 0.1 秒精度，只排除 0 秒的无间隔连发。
 pub const MIN_INTERVAL_SECONDS: f64 = 1.0;
 
 /// 读取设置文件时接受的字节上限。
@@ -1086,7 +1086,7 @@ mod tests {
         };
         s.normalize();
         assert_eq!(s.interval_seconds, MIN_INTERVAL_SECONDS);
-        assert_eq!(s.interval(), Duration::from_secs(MIN_INTERVAL_SECONDS));
+        assert_eq!(s.interval(), Duration::from_secs(1));
     }
 
     #[test]
