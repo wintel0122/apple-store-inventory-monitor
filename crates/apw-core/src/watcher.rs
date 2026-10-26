@@ -96,6 +96,9 @@ pub enum Event {
         /// 本轮覆盖的监控项数量。
         #[serde(rename = "targetCount")]
         target_count: usize,
+        /// 距离上一轮实际开始的单调时钟间隔；本会话首轮为空。
+        #[serde(rename = "startIntervalMs")]
+        start_interval_ms: Option<u64>,
     },
     /// 一轮查询结束，带上完整快照。
     ///
@@ -594,6 +597,8 @@ struct Engine<F: Fetcher> {
     running: bool,
     /// 当前监控会话已经开始的轮次数。暂停后重新开始会从 1 重新计数。
     cycle_number: u64,
+    /// 上一轮实际开始时间，用于测量真实轮次间隔。
+    previous_cycle_started_at: Option<Instant>,
 }
 
 impl<F: Fetcher> Engine<F> {
@@ -606,6 +611,7 @@ impl<F: Fetcher> Engine<F> {
             states: BTreeMap::new(),
             running: false,
             cycle_number: 0,
+            previous_cycle_started_at: None,
         }
     }
 
@@ -637,10 +643,14 @@ impl<F: Fetcher> Engine<F> {
             self.cycle_number = self.cycle_number.saturating_add(1);
             let cycle = self.cycle_number;
             let started_at = Instant::now();
+            let start_interval_ms = self.previous_cycle_started_at
+                .map(|previous| previous.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
+            self.previous_cycle_started_at = Some(started_at);
             self.emit_droppable(Event::CycleStarted {
                 cycle,
                 store_count,
                 target_count: expected.len(),
+                start_interval_ms,
             });
             let queried_delivery_region = self.config.delivery_region.clone();
             let queries = run_queries(
@@ -782,6 +792,9 @@ impl<F: Fetcher> Engine<F> {
         self.running = running;
         if running {
             self.cycle_number = 0;
+            self.previous_cycle_started_at = None;
+        } else {
+            self.previous_cycle_started_at = None;
         }
         self.emit_droppable(Event::RunStateChanged { running });
     }
