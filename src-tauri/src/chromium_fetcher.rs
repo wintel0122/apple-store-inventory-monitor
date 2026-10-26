@@ -2018,6 +2018,17 @@ impl AppleChromiumFetcher {
         self.state.lock().await.select_route_manually(node).await
     }
 
+    /// 与网络设置下拉列表使用同一份冷却判定，不进行网络请求。
+    /// None 表示不是 Clash 自动切换模式或没有节点，不应发送全冷却提醒。
+    pub async fn all_routes_resting(&self) -> Option<bool> {
+        let state = self.state.lock().await;
+        if state.network.mode != NetworkMode::Clash || state.routes.routes().is_empty() {
+            return None;
+        }
+        let now = Instant::now();
+        Some(state.routes.routes().iter().all(|route| state.routes.is_resting(route, now)))
+    }
+
     /// 列出专用策略组的节点、测速结果和冷却状态。测速在锁外进行，不阻塞查询。
     pub async fn list_routes(&self) -> Result<RouteList, String> {
         let (clash, group, filter) = {
