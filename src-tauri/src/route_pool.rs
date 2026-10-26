@@ -22,6 +22,9 @@ pub const COOLDOWN_STEPS: [Duration; 4] = [
 /// 不必像 541 那样长时间冷却；定期测速会把持续超时的节点提前排除。
 pub const UNREACHABLE_COOLDOWN: Duration = Duration::from_secs(60);
 
+/// 同一节点在同一 Apple 站点连续实际请求达到此次数后，强制进入最高冷却档。
+pub const USES_BEFORE_MAX_COOLDOWN: u32 = 30;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Cooldown {
     level: usize,
@@ -34,6 +37,8 @@ pub struct RoutePool {
     routes: Vec<String>,
     active: Option<String>,
     cooldowns: HashMap<(String, String), Cooldown>,
+    /// 每个节点 + Apple 站点的连续实际请求次数。
+    usage_counts: HashMap<(String, String), u32>,
     /// 连不通的节点，到期前对所有站点都跳过。
     unreachable: HashMap<String, Instant>,
 }
@@ -43,6 +48,8 @@ impl RoutePool {
     /// 节点列表就让刚被拦的节点立即复用。
     pub fn set_routes(&mut self, routes: Vec<String>) {
         self.cooldowns
+            .retain(|(route, _), _| routes.iter().any(|name| name == route));
+        self.usage_counts
             .retain(|(route, _), _| routes.iter().any(|name| name == route));
         self.unreachable.retain(|route, _| routes.contains(route));
         if self
@@ -141,6 +148,26 @@ impl RoutePool {
         duration
     }
 
+    /// 记录一次已经实际发起的请求。每个节点 + 站点独立计数；达到阈值后清零计数并强制进入最高冷却档。
+    /// 应在请求结果处理（包括成功清除旧冷却）之后调用，避免最高档被同次成功覆盖。
+    pub fn record_usage(&mut self, route: &str, site: &str, now: Instant) -> bool {
+        let key = (route.to_string(), site.to_string());
+        let count = self.usage_counts.entry(key.clone()).or_default();
+        *count = count.saturating_add(1);
+        if *count < USES_BEFORE_MAX_COOLDOWN {
+            return false;
+        }
+        self.usage_counts.insert(key.clone(), 0);
+        self.cooldowns.insert(
+            key,
+            Cooldown {
+                level: COOLDOWN_STEPS.len() - 1,
+                until: now + COOLDOWN_STEPS[COOLDOWN_STEPS.len() - 1],
+            },
+        );
+        true
+    }
+
     /// 线路在该站点拿到了正常响应，清除冷却档位。
     pub fn succeed(&mut self, route: &str, site: &str) {
         self.cooldowns
@@ -168,6 +195,7 @@ impl RoutePool {
     /// 用户手动指定节点：清除它在所有站点上的冷却和短暂跳过。
     pub fn clear_route(&mut self, route: &str) {
         self.cooldowns.retain(|(name, _), _| name != route);
+        self.usage_counts.retain(|(name, _), _| name != route);
         self.unreachable.remove(route);
     }
 
@@ -248,6 +276,31 @@ mod tests {
         }
         // 封顶后保持最长档。
         assert_eq!(pool.block("香港01", SITE, at), COOLDOWN_STEPS[3]);
+    }
+
+    #[test]
+    fn 同一节点同一站点连续三十次请求后进入最高冷却档并重置计数() {
+        let now = Instant::now();
+        let mut pool = pool(&["香港01"]);
+        for _ in 0..USES_BEFORE_MAX_COOLDOWN - 1 {
+            assert!(!pool.record_usage("香港01", SITE, now));
+        }
+        assert!(pool.is_available("香港01", SITE, now));
+        assert!(pool.record_usage("香港01", SITE, now));
+        assert!(!pool.is_available("香港01", SITE, now));
+        assert_eq!(
+            pool.remaining("香港01", SITE, now),
+            Some(COOLDOWN_STEPS[3])
+        );
+        // 另一个站点的计数相互独立。
+        assert!(!pool.record_usage("香港01", "www.apple.com", now));
+        assert!(pool.is_available("香港01", "www.apple.com", now));
+        // 最高冷却结束后从零重新累计。
+        let after = now + COOLDOWN_STEPS[3];
+        for _ in 0..USES_BEFORE_MAX_COOLDOWN - 1 {
+            assert!(!pool.record_usage("香港01", SITE, after));
+        }
+        assert!(pool.is_available("香港01", SITE, after));
     }
 
     #[test]
