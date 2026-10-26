@@ -231,7 +231,6 @@ function applyEvent(event: WatcherEvent): void {
         : null;
       update({
         cycle: event.cycle,
-        averageCycleSeconds,
         nextCheckAtMs: null,
         cooling: false,
       });
@@ -246,7 +245,6 @@ function applyEvent(event: WatcherEvent): void {
       update({
         rows: event.snapshot,
         cycle: event.cycle,
-        averageCycleSeconds,
         nextCheckAtMs: Date.now() + event.nextCheckInSecs * 1_000,
         cooling: event.cooling,
         route: event.route ?? null,
@@ -283,7 +281,6 @@ function applyEvent(event: WatcherEvent): void {
         update({
           running: event.running,
           cycle: event.running ? 0 : state.cycle,
-          firstCycleStartedAtMs: event.running ? null : state.firstCycleStartedAtMs,
           averageCycleSeconds: event.running ? null : state.averageCycleSeconds,
           nextCheckAtMs: event.running ? state.nextCheckAtMs : null,
           cooling: event.running ? state.cooling : false,
@@ -509,7 +506,6 @@ export async function startWatching(): Promise<void> {
       update({
         running,
         cycle: running ? 0 : state.cycle,
-        firstCycleStartedAtMs: running ? null : state.firstCycleStartedAtMs,
         averageCycleSeconds: running ? null : state.averageCycleSeconds,
       });
       pushLog(running ? "已开始监控。" : "启动命令已返回，但监控引擎没有进入运行状态。");
