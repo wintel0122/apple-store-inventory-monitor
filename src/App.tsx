@@ -589,6 +589,9 @@ export default function App() {
         : `约 ${secondsUntilNextCheck} 秒后检查`;
 
   const cyclePrefix = ui.cycle > 0 ? `第 ${ui.cycle} 轮 · ` : "";
+  const averageCyclePrefix = ui.averageCycleSeconds !== null
+    ? `平均每轮 ${ui.averageCycleSeconds.toFixed(2)} 秒 · `
+    : "";
 
   const storeOptions = useMemo(
     () => ui.stores.map((store) => ({ value: store.number, label: store.title })),
@@ -787,7 +790,7 @@ export default function App() {
                   aria-hidden="true"
                 />
                 <span className="hidden text-xs text-muted-foreground sm:inline">监控状态</span>
-                <span className="text-sm font-medium tabular-nums">{ui.running ? `${cyclePrefix}${browserFailure !== null ? browserRunningLabel : runningLabel}` : "已暂停"}</span>
+                <span className="text-sm font-medium tabular-nums">{ui.running ? `${cyclePrefix}${averageCyclePrefix}${browserFailure !== null ? browserRunningLabel : runningLabel}` : "已暂停"}</span>
               </div>
               {ui.running && ui.cooling && (
                 <Button
