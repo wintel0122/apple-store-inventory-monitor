@@ -1491,7 +1491,7 @@ async fn pump_events(app: AppHandle, mut events: tokio::sync::mpsc::Receiver<Eve
                 serde_json::json!({"cycle": cycle, "elapsedMs": elapsed_ms, "startIntervalMs": start_interval_ms, "healthy": healthy, "targetCount": snapshot.len(), "inStockCount": snapshot.iter().filter(|s| s.availability.is_in_stock()).count()}),
             ),
             Event::RunStateChanged { running } => {
-                if running {
+                if *running {
                     if let Some(state) = app.try_state::<AppState>() {
                         if let Ok(mut samples) = state.cycle_intervals_ms.lock() {
                             samples.clear();
