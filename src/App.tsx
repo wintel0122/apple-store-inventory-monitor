@@ -588,6 +588,8 @@ export default function App() {
         ? `保护冷却中 · 约 ${secondsUntilNextCheck} 秒后检查`
         : `约 ${secondsUntilNextCheck} 秒后检查`;
 
+  const cyclePrefix = ui.cycle > 0 ? `第 ${ui.cycle} 轮 · ` : "";
+
   const storeOptions = useMemo(
     () => ui.stores.map((store) => ({ value: store.number, label: store.title })),
     [ui.stores],
@@ -785,7 +787,7 @@ export default function App() {
                   aria-hidden="true"
                 />
                 <span className="hidden text-xs text-muted-foreground sm:inline">监控状态</span>
-                <span className="text-sm font-medium tabular-nums">{ui.running ? browserFailure !== null ? browserRunningLabel : runningLabel : "已暂停"}</span>
+                <span className="text-sm font-medium tabular-nums">{ui.running ? `${cyclePrefix}${browserFailure !== null ? browserRunningLabel : runningLabel}` : "已暂停"}</span>
               </div>
               {ui.running && ui.cooling && (
                 <Button
