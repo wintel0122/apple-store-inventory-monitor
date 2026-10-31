@@ -741,6 +741,7 @@ async fn save_settings(
     state.put_settings(next.clone())?;
     state.watcher.set_targets(next.targets.clone()).await;
     state.watcher.set_interval(next.interval()).await;
+    state.fetcher.set_request_interval(next.interval()).await;
     state
         .watcher
         .set_delivery_region(next.delivery_region.clone())
@@ -844,7 +845,9 @@ async fn set_interval(state: tauri::State<'_, AppState>, seconds: f64) -> Result
     let mut next = state.settings_snapshot();
     next.interval_seconds = secs;
     state.put_settings(next)?;
-    state.watcher.set_interval(Duration::from_millis((secs * 1_000.0).round() as u64)).await;
+    let interval = Duration::from_millis((secs * 1_000.0).round() as u64);
+    state.watcher.set_interval(interval).await;
+    state.fetcher.set_request_interval(interval).await;
     Ok(secs)
 }
 
@@ -1811,6 +1814,7 @@ pub fn run() {
                 let interval = settings.interval();
                 tauri::async_runtime::spawn(async move {
                     fetcher.set_network(network).await;
+                    fetcher.set_request_interval(interval).await;
                     watcher.set_targets(targets).await;
                     watcher.set_interval(interval).await;
                     // 仅本地验收启动命令显式指定时恢复原有监控，普通启动仍保持暂停。

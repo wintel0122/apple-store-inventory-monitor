@@ -36,7 +36,7 @@ const CHROME_START_TIMEOUT: Duration = Duration::from_secs(12);
 const DEVTOOLS_SOCKET_TIMEOUT: Duration = Duration::from_secs(10);
 const SESSION_READY_TIMEOUT: Duration = Duration::from_secs(50);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(25);
-const MIN_REQUEST_INTERVAL: Duration = Duration::from_secs(2);
+const MIN_REQUEST_INTERVAL: Duration = Duration::from_secs(3);
 const DELIVERY_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 const EMPTY_DELIVERY_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 const MAX_RESPONSE_BYTES: usize = 4 << 20;
@@ -1394,12 +1394,19 @@ fn plan_nearby_parts(groups: &[Vec<Target>]) -> HashMap<PickupCacheKey, Vec<Stri
 struct RequestGate {
     last_sent: Option<Instant>,
     cycle_request_count: u32,
+    /// 当前设置的监控轮次间隔；实际请求间隔至少为 MIN_REQUEST_INTERVAL。
+    monitor_interval: Duration,
 }
 
 impl RequestGate {
+    fn effective_interval(&self) -> Duration {
+        self.monitor_interval.max(MIN_REQUEST_INTERVAL)
+    }
+
     fn next_delay(&mut self, now: Instant) -> Duration {
+        let min_interval = self.effective_interval();
         self.last_sent
-            .map(|last| (last + MIN_REQUEST_INTERVAL).saturating_duration_since(now))
+            .map(|last| (last + min_interval).saturating_duration_since(now))
             .unwrap_or_default()
     }
 
@@ -2088,6 +2095,11 @@ impl AppleChromiumFetcher {
     /// 应用新的线路设置。代理参数变化时，下一次查询会重启专属浏览器。
     pub async fn set_network(&self, network: NetworkSettings) {
         self.state.lock().await.set_network(network);
+    }
+
+    /// 同步用户设置的监控轮次间隔；实际请求间隔至少为 3 秒。
+    pub async fn set_request_interval(&self, interval: Duration) {
+        self.state.lock().await.gate.monitor_interval = interval;
     }
 
     async fn pickup(
@@ -3022,7 +3034,7 @@ pub(crate) mod tests {
 
         for expected_in_stock in [true, false] {
             fetcher.begin_cycle().await;
-            // 测试不需要真的等生产环境的两秒最小间隔。
+            // 测试不需要真的等生产环境的三秒最小间隔。
             fetcher.state.lock().await.gate.last_sent = None;
             for store in stores {
                 let mut target = test_target("MJXQ4ZA/A");
@@ -3162,7 +3174,7 @@ pub(crate) mod tests {
         );
         assert!(fetcher.state.lock().await.unavailable_nearby.contains(&key));
 
-        // 避免测试真的等待生产环境的两秒间隔；这里仍会记录一次请求。
+        // 避免测试真的等待生产环境的三秒间隔；这里仍会记录一次请求。
         fetcher.state.lock().await.gate.last_sent = None;
         let mut second_target = test_target("one");
         second_target.store_number = "R793".into();
@@ -3241,7 +3253,7 @@ pub(crate) mod tests {
                 ScheduleHint::default(),
                 "辅助送货失败不能改变取货轮询间隔"
             );
-            // 避免测试真的等待生产环境的两秒间隔。
+            // 避免测试真的等待生产环境的三秒间隔。
             state.gate.last_sent = None;
         }
 
@@ -3268,7 +3280,7 @@ pub(crate) mod tests {
                 !state.delivery_rejected_this_cycle(region),
                 "新一轮必须立即清除送货拒绝标记"
             );
-            // 避免测试真的等待生产环境的两秒间隔。
+            // 避免测试真的等待生产环境的三秒间隔。
             state.gate.last_sent = None;
         }
 
@@ -3785,21 +3797,22 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn 真实请求只保留两秒最小间隔() {
+    fn 请求间隔跟随轮次设置且最小为三秒() {
         let start = Instant::now();
         let mut gate = RequestGate {
             last_sent: Some(start),
+            monitor_interval: Duration::from_millis(2_550),
             ..RequestGate::default()
         };
-        assert_eq!(gate.next_delay(start), MIN_REQUEST_INTERVAL);
-        assert_eq!(
-            gate.next_delay(start + Duration::from_secs(1)),
-            Duration::from_secs(1)
-        );
-        assert_eq!(
-            gate.next_delay(start + MIN_REQUEST_INTERVAL),
-            Duration::ZERO
-        );
+        assert_eq!(gate.effective_interval(), Duration::from_secs(3));
+        assert_eq!(gate.next_delay(start), Duration::from_secs(3));
+        gate.monitor_interval = Duration::from_secs(3);
+        assert_eq!(gate.next_delay(start), Duration::from_secs(3));
+        gate.monitor_interval = Duration::from_secs(5);
+        assert_eq!(gate.effective_interval(), Duration::from_secs(5));
+        assert_eq!(gate.next_delay(start), Duration::from_secs(5));
+        assert_eq!(gate.next_delay(start + Duration::from_secs(4)), Duration::from_secs(1));
+        assert_eq!(gate.next_delay(start + Duration::from_secs(5)), Duration::ZERO);
     }
 
     #[test]
