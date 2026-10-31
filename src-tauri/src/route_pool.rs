@@ -66,6 +66,14 @@ impl RoutePool {
         &self.routes
     }
 
+    /// 当前节点在指定 Apple 站点已连续使用的实际请求次数。
+    pub fn usage_count(&self, route: &str, site: &str) -> u32 {
+        self.usage_counts
+            .get(&(route.to_string(), site.to_string()))
+            .copied()
+            .unwrap_or_default()
+    }
+
     pub fn active(&self) -> Option<&str> {
         self.active.as_deref()
     }
@@ -303,8 +311,10 @@ mod tests {
         for _ in 0..USES_BEFORE_MAX_COOLDOWN - 1 {
             assert!(!pool.record_usage("香港01", SITE, now));
         }
+        assert_eq!(pool.usage_count("香港01", SITE), USES_BEFORE_MAX_COOLDOWN - 1);
         assert!(pool.is_available("香港01", SITE, now));
         assert!(pool.record_usage("香港01", SITE, now));
+        assert_eq!(pool.usage_count("香港01", SITE), 0);
         assert!(!pool.is_available("香港01", SITE, now));
         assert_eq!(
             pool.remaining("香港01", SITE, now),

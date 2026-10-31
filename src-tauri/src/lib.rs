@@ -1803,6 +1803,13 @@ pub fn run() {
                 ..WatcherConfig::default()
             };
             let fetcher = AppleChromiumFetcher::new();
+            let mut request_logs = fetcher.subscribe_request_logs();
+            let request_log_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                while let Ok(line) = request_logs.recv().await {
+                    let _ = request_log_app.emit(NOTICE_CHANNEL, line);
+                }
+            });
             let (watcher, events, engine) = Watcher::new(fetcher.clone(), watcher_config);
             tauri::async_runtime::spawn(engine);
 

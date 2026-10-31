@@ -42,7 +42,7 @@ import { describeUpdateError, type UpdateProgress } from "./updateStatus";
 const EVENT_CHANNEL = "watcher://event";
 const NOTICE_CHANNEL = "watcher://notice";
 const SETTINGS_CHANNEL = "watcher://settings";
-const MAX_LOG_LINES = 300;
+const MAX_LOG_LINES = 1_000;
 
 export interface UiState {
   rows: TargetState[];

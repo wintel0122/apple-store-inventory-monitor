@@ -25,7 +25,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
 use crate::browser_support::startup_exit_detail;
@@ -1298,6 +1298,7 @@ pub struct RouteInfo {
 pub struct AppleChromiumFetcher {
     state: Arc<Mutex<QueryState>>,
     profile_dir: PathBuf,
+    request_log_tx: broadcast::Sender<String>,
 }
 
 type PickupCacheKey = (&'static str, Vec<String>, String);
@@ -1488,6 +1489,8 @@ struct QueryState {
     route_providers: HashMap<String, String>,
     /// 已经提示过「全部节点冷却」的站点，避免同一次冷却反复弹出告警。
     cooling_announced: HashSet<String>,
+    /// 发往前端监控日志的逐请求记录。
+    request_log_tx: Option<broadcast::Sender<String>>,
 }
 
 impl QueryState {
@@ -1619,6 +1622,42 @@ impl QueryState {
                     format!("Clash 节点 {node}（{}）", notes.join("，"))
                 }
             }),
+        }
+    }
+
+    /// 记录每一次真实 Apple 请求。计数口径与节点最高冷却保持一致：
+    /// 同一节点 + 同一站点的取货、普通送货、Watch 送货请求统一累计。
+    fn record_request_usage(
+        &mut self,
+        route: Option<&str>,
+        region: &'static Region,
+        request_type: &str,
+    ) {
+        if !self.rotating() {
+            return;
+        }
+        let Some(route) = route else {
+            return;
+        };
+        let site = region_site(region);
+        let next_count = self.routes.usage_count(route, &site).saturating_add(1);
+        let reached_limit = self.routes.record_usage(route, &site, Instant::now());
+        let cooldown_note = if reached_limit {
+            format!(
+                " | 达到阈值，进入最高冷却档（{} 分钟）",
+                crate::route_pool::COOLDOWN_STEPS[3].as_secs() / 60
+            )
+        } else {
+            String::new()
+        };
+        let line = format!(
+            "节点：{route} | 站点：{site} | 请求类型：{request_type} | 累计使用：{next_count}/{}{}",
+            crate::route_pool::USES_BEFORE_MAX_COOLDOWN,
+            cooldown_note
+        );
+        eprintln!("{line}");
+        if let Some(sender) = &self.request_log_tx {
+            let _ = sender.send(line);
         }
     }
 
@@ -1946,19 +1985,8 @@ impl QueryState {
                 }
                 Err(_) => false,
             };
-            // 每次实际请求都计数（包括失败请求），按节点 + Apple 站点独立累计。
-            // 放在结果处理之后，确保第 30 次请求触发的最高冷却不会被同次成功清除。
-            if self.rotating()
-                && let Some(route) = requested_route.as_deref()
-                && self.routes.record_usage(route, &region_site(region), Instant::now())
-            {
-                eprintln!(
-                    "Clash 节点 {route} 在 {} 连续使用达到 {} 次，进入最高冷却档（{} 分钟）",
-                    region_site(region),
-                    crate::route_pool::USES_BEFORE_MAX_COOLDOWN,
-                    crate::route_pool::COOLDOWN_STEPS[3].as_secs() / 60
-                );
-            }
+            // 结果处理后统一记录；节点切换不会改变本次真实请求使用的线路。
+            self.record_request_usage(requested_route.as_deref(), region, "取货");
             if switch && attempts < self.routes.routes().len().max(1) * 2 {
                 continue;
             }
@@ -2027,10 +2055,19 @@ impl QueryState {
 
 impl AppleChromiumFetcher {
     pub fn new() -> Self {
+        let (request_log_tx, _) = broadcast::channel(256);
+        let mut state = QueryState::default();
+        state.request_log_tx = Some(request_log_tx.clone());
         Self {
-            state: Arc::new(Mutex::new(QueryState::default())),
+            state: Arc::new(Mutex::new(state)),
             profile_dir: chromium_profile_dir(),
+            request_log_tx,
         }
+    }
+
+    /// 订阅实际请求日志，由 Tauri 装配层转发到前端日志面板。
+    pub fn subscribe_request_logs(&self) -> broadcast::Receiver<String> {
+        self.request_log_tx.subscribe()
     }
 
     /// 显式关闭共享浏览器会话。
@@ -2333,6 +2370,7 @@ impl AppleChromiumFetcher {
                                 .delivery_attempts
                                 .insert(DeliveryCacheKey::new(target, location));
                         }
+                        let requested_route = guard.routes.active().map(str::to_string);
                         let fetched = {
                             let QueryState { session, gate, .. } = &mut *guard;
                             session
@@ -2341,6 +2379,7 @@ impl AppleChromiumFetcher {
                                 .fetch_product_delivery(region, &missing_parts, location, gate)
                                 .await
                         };
+                        guard.record_request_usage(requested_route.as_deref(), region, "送货");
                         match fetched {
                             Ok(delivery) => {
                                 for target in targets.iter().filter(|target| {
@@ -2373,6 +2412,7 @@ impl AppleChromiumFetcher {
                         guard
                             .delivery_attempts
                             .insert(DeliveryCacheKey::new(target, location));
+                        let requested_route = guard.routes.active().map(str::to_string);
                         let fetched = {
                             let QueryState { session, gate, .. } = &mut *guard;
                             session
@@ -2381,6 +2421,10 @@ impl AppleChromiumFetcher {
                                 .fetch_watch_delivery(region, target, location, gate)
                                 .await
                         };
+                        // Ok(None) 表示目标不是可配送的套件型号，函数没有发出网络请求。
+                        if !matches!(&fetched, Ok(None)) {
+                            guard.record_request_usage(requested_route.as_deref(), region, "送货");
+                        }
                         match fetched {
                             Ok(Some(message)) => guard.cache_delivery(
                                 target,
