@@ -1644,15 +1644,15 @@ impl QueryState {
         let reached_limit = self.routes.record_usage(route, &site, Instant::now());
         let cooldown_note = if reached_limit {
             format!(
-                " | 达到阈值，进入最高冷却档（{} 分钟）",
-                crate::route_pool::COOLDOWN_STEPS[3].as_secs() / 60
+                " | 达到阈值，进入等级 1 冷却（{} 分钟）",
+                crate::route_pool::COOLDOWN_STEPS[0].as_secs() / 60
             )
         } else {
             String::new()
         };
         let line = format!(
             "节点：{route} | 站点：{site} | 请求类型：{request_type} | 累计使用：{next_count}/{}{}",
-            crate::route_pool::USES_BEFORE_MAX_COOLDOWN,
+            crate::route_pool::USES_BEFORE_COOLDOWN,
             cooldown_note
         );
         eprintln!("{line}");
@@ -1918,7 +1918,7 @@ impl QueryState {
             return false;
         };
         self.routes.mark_unreachable(&active, Instant::now());
-        eprintln!("Clash 节点 {active} 连不通，暂时跳过");
+        eprintln!("Clash 节点 {active} 连接失败，进入等级 1 冷却（{} 分钟）", crate::route_pool::UNREACHABLE_COOLDOWN.as_secs() / 60);
         self.dead_routes.insert(active);
         self.can_switch_route(region)
     }
@@ -5153,7 +5153,7 @@ pub(crate) mod tests {
             state.consecutive_rejections = 3;
         }
         let delay = fetcher.select_route("日本01").await.expect("应能手动切换");
-        assert_eq!(delay, Some(120));
+        assert_eq!(delay, Some(1800));
         let log = log.lock().await.clone();
         assert!(
             log.iter()
