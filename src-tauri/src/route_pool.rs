@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-/// 冷却档位对应时长。Apple 拒绝固定等级 4；连接失败和请求次数阈值固定等级 1。
+/// 冷却档位：探测仍被拒绝时逐级延长，最长 30 分钟。
 pub const COOLDOWN_STEPS: [Duration; 4] = [
     Duration::from_secs(5 * 60),
     Duration::from_secs(10 * 60),
@@ -18,11 +18,12 @@ pub const COOLDOWN_STEPS: [Duration; 4] = [
     Duration::from_secs(30 * 60),
 ];
 
-/// 节点连接失败时，整个节点进入等级 1 冷却 5 分钟。
-pub const UNREACHABLE_COOLDOWN: Duration = Duration::from_secs(5 * 60);
+/// 节点连不通时的短暂跳过时间。连不通是节点自身的问题，与 Apple 的封禁无关，
+/// 不必像 541 那样长时间冷却；定期测速会把持续超时的节点提前排除。
+pub const UNREACHABLE_COOLDOWN: Duration = Duration::from_secs(60);
 
-/// 同一节点 + Apple 站点累计实际请求达到 5 次后，进入等级 1 冷却 5 分钟。
-pub const USES_BEFORE_COOLDOWN: u32 = 5;
+/// 同一节点在同一 Apple 站点连续实际请求达到此次数后，强制进入最高冷却档。
+pub const USES_BEFORE_MAX_COOLDOWN: u32 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Cooldown {
@@ -36,7 +37,7 @@ pub struct RoutePool {
     routes: Vec<String>,
     active: Option<String>,
     cooldowns: HashMap<(String, String), Cooldown>,
-    /// 每个节点 + Apple 站点的累计实际请求次数（触发阈值后清零）。
+    /// 每个节点 + Apple 站点的连续实际请求次数。
     usage_counts: HashMap<(String, String), u32>,
     /// 连不通的节点，到期前对所有站点都跳过。
     unreachable: HashMap<String, Instant>,
@@ -131,49 +132,47 @@ impl RoutePool {
             .map(String::as_str)
     }
 
-    /// Apple 返回 403、429、541 时直接进入等级 4（30 分钟）。
-    /// 已处于等级 4 冷却时，重复并发拒绝不延长冷却时间。
+    /// 记录一次拒绝，返回这条线路本次的冷却时长。
+    ///
+    /// 首次被拒从 5 分钟开始；冷却结束后的探测再被拒才升一档。冷却期内重复登记
+    /// （例如同一轮并发请求先后返回）不升档，避免一次事故被数成多次。
     pub fn block(&mut self, route: &str, site: &str, now: Instant) -> Duration {
         let key = (route.to_string(), site.to_string());
-        if let Some(cooldown) = self.cooldowns.get(&key)
-            && cooldown.level == COOLDOWN_STEPS.len() - 1
-            && cooldown.until > now
-        {
-            return cooldown.until.saturating_duration_since(now);
-        }
-        let duration = COOLDOWN_STEPS[COOLDOWN_STEPS.len() - 1];
+        let level = match self.cooldowns.get(&key) {
+            Some(cooldown) if cooldown.until > now => {
+                return cooldown.until.saturating_duration_since(now);
+            }
+            Some(cooldown) => (cooldown.level + 1).min(COOLDOWN_STEPS.len() - 1),
+            None => 0,
+        };
+        let duration = COOLDOWN_STEPS[level];
         self.cooldowns.insert(
             key,
             Cooldown {
-                level: COOLDOWN_STEPS.len() - 1,
+                level,
                 until: now + duration,
             },
         );
         duration
     }
 
-    /// 记录一次已经实际发起的请求。每个节点 + 站点独立计数；累计达到 5 次后清零并进入等级 1（5 分钟）。
-    /// 若同一次请求已触发 Apple 等级 4 拒绝冷却，等级 1 不得覆盖等级 4。
+    /// 记录一次已经实际发起的请求。每个节点 + 站点独立计数；达到阈值后清零计数并强制进入最高冷却档。
+    /// 应在请求结果处理（包括成功清除旧冷却）之后调用，避免最高档被同次成功覆盖。
     pub fn record_usage(&mut self, route: &str, site: &str, now: Instant) -> bool {
         let key = (route.to_string(), site.to_string());
         let count = self.usage_counts.entry(key.clone()).or_default();
         *count = count.saturating_add(1);
-        if *count < USES_BEFORE_COOLDOWN {
+        if *count < USES_BEFORE_MAX_COOLDOWN {
             return false;
         }
         self.usage_counts.insert(key.clone(), 0);
-        let has_active_level_four = self.cooldowns.get(&key).is_some_and(|cooldown| {
-            cooldown.level == COOLDOWN_STEPS.len() - 1 && cooldown.until > now
-        });
-        if !has_active_level_four {
-            self.cooldowns.insert(
-                key,
-                Cooldown {
-                    level: 0,
-                    until: now + COOLDOWN_STEPS[0],
-                },
-            );
-        }
+        self.cooldowns.insert(
+            key,
+            Cooldown {
+                level: COOLDOWN_STEPS.len() - 1,
+                until: now + COOLDOWN_STEPS[COOLDOWN_STEPS.len() - 1],
+            },
+        );
         true
     }
 
@@ -211,17 +210,16 @@ impl RoutePool {
     /// 返回节点当前有效的最高冷却等级及该记录的剩余时间。
     /// 同一节点可能在多个 Apple 站点分别冷却，界面展示等级最高的一项。
     pub fn cooldown_status(&self, route: &str, now: Instant) -> Option<(usize, Duration)> {
-        let site_cooldown = self.cooldowns
+        self.cooldowns
             .iter()
             .filter(|((name, _), cooldown)| name == route && cooldown.until > now)
-            .map(|(_, cooldown)| (cooldown.level + 1, cooldown.until.saturating_duration_since(now)))
-            .max_by_key(|(level, remaining)| (*level, *remaining));
-        let unreachable = self.unreachable
-            .get(route)
-            .map(|until| until.saturating_duration_since(now))
-            .filter(|remaining| !remaining.is_zero())
-            .map(|remaining| (1, remaining));
-        site_cooldown.into_iter().chain(unreachable).max_by_key(|(level, remaining)| (*level, *remaining))
+            .max_by_key(|(_, cooldown)| (cooldown.level, cooldown.until))
+            .map(|(_, cooldown)| {
+                (
+                    cooldown.level + 1,
+                    cooldown.until.saturating_duration_since(now),
+                )
+            })
     }
 
     /// 节点暂时无法连接时的剩余跳过时间。
@@ -287,50 +285,60 @@ mod tests {
     }
 
     #[test]
-    fn Apple拒绝始终直接进入等级四() {
+    fn 只有冷却结束后的探测再被拦才升档() {
         let now = Instant::now();
         let mut pool = pool(&["香港01"]);
-        assert_eq!(pool.block("香港01", SITE, now), COOLDOWN_STEPS[3]);
+        assert_eq!(pool.block("香港01", SITE, now), COOLDOWN_STEPS[0]);
+        // 冷却期内的重复登记不升档。
         let later = now + Duration::from_secs(60);
-        assert_eq!(pool.block("香港01", SITE, later), COOLDOWN_STEPS[3] - Duration::from_secs(60));
-        let after = now + COOLDOWN_STEPS[3];
-        assert_eq!(pool.block("香港01", SITE, after), COOLDOWN_STEPS[3]);
+        assert_eq!(
+            pool.block("香港01", SITE, later),
+            COOLDOWN_STEPS[0] - Duration::from_secs(60)
+        );
+        let mut at = now + COOLDOWN_STEPS[0];
+        for step in &COOLDOWN_STEPS[1..] {
+            assert_eq!(pool.block("香港01", SITE, at), *step);
+            at += *step;
+        }
+        // 封顶后保持最长档。
+        assert_eq!(pool.block("香港01", SITE, at), COOLDOWN_STEPS[3]);
     }
 
     #[test]
-    fn 同一节点同一站点累计五次请求后进入等级一并重置计数() {
+    fn 同一节点同一站点连续三十次请求后进入最高冷却档并重置计数() {
         let now = Instant::now();
         let mut pool = pool(&["香港01"]);
-        for _ in 0..USES_BEFORE_COOLDOWN - 1 {
+        for _ in 0..USES_BEFORE_MAX_COOLDOWN - 1 {
             assert!(!pool.record_usage("香港01", SITE, now));
         }
-        assert_eq!(pool.usage_count("香港01", SITE), USES_BEFORE_COOLDOWN - 1);
+        assert_eq!(pool.usage_count("香港01", SITE), USES_BEFORE_MAX_COOLDOWN - 1);
         assert!(pool.is_available("香港01", SITE, now));
         assert!(pool.record_usage("香港01", SITE, now));
         assert_eq!(pool.usage_count("香港01", SITE), 0);
         assert!(!pool.is_available("香港01", SITE, now));
         assert_eq!(
             pool.remaining("香港01", SITE, now),
-            Some(COOLDOWN_STEPS[0])
+            Some(COOLDOWN_STEPS[3])
         );
         // 另一个站点的计数相互独立。
         assert!(!pool.record_usage("香港01", "www.apple.com", now));
         assert!(pool.is_available("香港01", "www.apple.com", now));
-        // 等级 1 冷却结束后从零重新累计。
+        // 最高冷却结束后从零重新累计。
         let after = now + COOLDOWN_STEPS[3];
-        for _ in 0..USES_BEFORE_COOLDOWN - 1 {
+        for _ in 0..USES_BEFORE_MAX_COOLDOWN - 1 {
             assert!(!pool.record_usage("香港01", SITE, after));
         }
         assert!(pool.is_available("香港01", SITE, after));
     }
 
     #[test]
-    fn Apple拒绝冷却结束后再次拒绝仍然直接等级四() {
+    fn 探测成功后从第一档重新开始() {
         let now = Instant::now();
         let mut pool = pool(&["香港01"]);
         pool.block("香港01", SITE, now);
+        pool.block("香港01", SITE, now + COOLDOWN_STEPS[0]);
         pool.succeed("香港01", SITE);
-        assert_eq!(pool.block("香港01", SITE, now), COOLDOWN_STEPS[3]);
+        assert_eq!(pool.block("香港01", SITE, now), COOLDOWN_STEPS[0]);
     }
 
     #[test]
@@ -339,7 +347,7 @@ mod tests {
         let mut pool = pool(&["香港01", "日本01"]);
         pool.block("香港01", SITE, now);
         pool.block("日本01", SITE, now + Duration::from_secs(120));
-        assert_eq!(pool.wait_for(SITE, now), Some(COOLDOWN_STEPS[3]));
+        assert_eq!(pool.wait_for(SITE, now), Some(COOLDOWN_STEPS[0]));
         pool.set_routes(vec!["香港01".into(), "日本01".into(), "美国01".into()]);
         assert_eq!(pool.wait_for(SITE, now), None);
     }
@@ -363,11 +371,11 @@ mod tests {
         pool.block("香港01", SITE, now);
         pool.release_waits(now);
         assert!(pool.is_available("香港01", SITE, now));
-        assert_eq!(pool.block("香港01", SITE, now), COOLDOWN_STEPS[3]);
+        assert_eq!(pool.block("香港01", SITE, now), COOLDOWN_STEPS[1]);
     }
 
     #[test]
-    fn 连不通的节点进入等级一冷却五分钟且对所有站点生效() {
+    fn 连不通的节点短暂跳过且对所有站点生效() {
         let now = Instant::now();
         let mut pool = pool(&["香港01", "日本01"]);
         pool.set_active(Some("香港01".into()));
@@ -379,7 +387,7 @@ mod tests {
             Some("香港01")
         );
         // 连不通不计入 Apple 冷却档位。
-        assert_eq!(pool.block("香港01", SITE, now), COOLDOWN_STEPS[3]);
+        assert_eq!(pool.block("香港01", SITE, now), COOLDOWN_STEPS[0]);
     }
 
     #[test]

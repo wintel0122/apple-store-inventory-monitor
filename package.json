@@ -1,7 +1,7 @@
 {
   "name": "apple-store-inventory-monitor",
   "private": true,
-  "version": "1.0.26-plus-v4",
+  "version": "1.0.26-plus-v3",
   "type": "module",
   "scripts": {
     "dev": "vite",
