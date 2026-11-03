@@ -2395,9 +2395,11 @@ impl AppleChromiumFetcher {
                             }
                             Err(error) => {
                                 eprintln!("普通商品送货查询失败：{error}");
-                                if matches!(error, ApiError::Blocked(_) | ApiError::RateLimited(_))
-                                {
+                                if matches!(&error, ApiError::Blocked(_) | ApiError::RateLimited(_)) {
+                                    guard.route_rejected(region);
                                     guard.reject_delivery_for_cycle(region);
+                                } else if guard.rotating() && is_node_failure(&error) {
+                                    guard.route_unreachable(region);
                                 }
                             }
                         }
@@ -2439,9 +2441,11 @@ impl AppleChromiumFetcher {
                             }
                             Err(error) => {
                                 eprintln!("Watch 送货查询失败（{}）：{error}", target.part_number);
-                                if matches!(error, ApiError::Blocked(_) | ApiError::RateLimited(_))
-                                {
+                                if matches!(&error, ApiError::Blocked(_) | ApiError::RateLimited(_)) {
+                                    guard.route_rejected(region);
                                     guard.reject_delivery_for_cycle(region);
+                                } else if guard.rotating() && is_node_failure(&error) {
+                                    guard.route_unreachable(region);
                                 }
                             }
                         }
